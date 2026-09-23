@@ -1,4 +1,5 @@
 import {readSupplierExcel,exportOrders} from './xlsx.js';
+import {groupProducts} from './product-groups.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
 const tg=window.Telegram?.WebApp;
@@ -7,7 +8,7 @@ const moneyFormats=[0,2].map(maximumFractionDigits=>new Intl.NumberFormat('ru-RU
 const money=n=>moneyFormats[n%100?1:0].format(n/100);
 const date=s=>s?new Date(s.length===10?s+'T12:00:00':s).toLocaleDateString('ru-RU',{day:'numeric',month:'long'}):'Дата не указана';
 const statuses={draft:'Черновик',arrived:'В продаже',closed:'Продажа закрыта',placed:'Оформлен',confirmed:'Подтверждён',cancelled:'Отменён'};
-const state={preview:false,admin:false,ready:false,view:'shipments',shipments:[],current:null,filter:'all',sort:'new',search:'',cart:{},images:{},orders:[],requestKey:null,managers:[],managerId:null};
+const state={preview:false,admin:false,ready:false,view:'shipments',shipments:[],current:null,filter:'all',sort:'new',search:'',cart:{},images:{},orders:[],requestKey:null,managers:[],managerId:null,productGroup:''};
 let toastTimer,refreshPromise,importController;
 const imageRequests=new Map();
 const debounce=(fn,delay=120)=>{let timer;return (...args)=>{clearTimeout(timer);timer=setTimeout(()=>fn(...args),delay);};};
@@ -87,18 +88,23 @@ function cards(){
   document.querySelectorAll('[data-shipment]').forEach(b=>b.onclick=()=>openShipment(b.dataset.shipment));
   list.forEach(loadImages);
 }
-function openShipment(id){if(state.current!==id){state.cart={};state.requestKey=null;}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
+function openShipment(id){if(state.current!==id){state.cart={};state.requestKey=null;state.productGroup='';}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
 function renderDetail(){
   const s=activeShipment();if(!s){state.current=null;render();return;}
-  app.innerHTML=`<button class="back" id="back">← Все поступления</button><section class="detail-head">${badge(s.status)}<h1>${esc(s.title)}</h1>${s.description?`<p class="subtitle">${esc(s.description).replaceAll('\n','<br>')}</p>`:''}<div class="detail-meta"><span>Дата поступления<strong>${date(s.eta)}</strong></span><span>Позиций<strong>${s.products.length}</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"></div><div class="products" id="products"></div>`;
+  const groups=groupProducts(s.products);
+  if(!groups.some(g=>g.name===state.productGroup))state.productGroup='';
+  app.innerHTML=`<button class="back" id="back">← Все поступления</button><section class="detail-head">${badge(s.status)}<h1>${esc(s.title)}</h1>${s.description?`<p class="subtitle">${esc(s.description).replaceAll('\n','<br>')}</p>`:''}<div class="detail-meta"><span>Дата поступления<strong>${date(s.eta)}</strong></span><span>Позиций<strong>${s.products.length}</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"><select id="product-group" aria-label="Тип товара"><option value="">Все типы товаров</option>${groups.map(g=>`<option value="${esc(g.name)}">${esc(g.name)} (${g.products.length})</option>`).join('')}</select></div><div class="product-groups" id="products"></div>`;
+  $('#product-group').value=state.productGroup;
+  $('#product-group').onchange=e=>{state.productGroup=e.target.value;products($('#product-search').value);};
   $('#back').onclick=goBack;$('#product-search').oninput=debounce(e=>{if(e.target.isConnected)products(e.target.value);});products('');loadImages(s);
 }
 function products(query){
   const s=activeShipment(),list=s.products.filter(p=>`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase()));
-  $('#products').innerHTML=list.length?list.map(p=>{
+  const groups=groupProducts(list).filter(g=>!state.productGroup||g.name===state.productGroup);
+  $('#products').innerHTML=groups.length?groups.map((group,index)=>`<section class="product-group" aria-labelledby="product-group-${index}"><div class="group-heading"><h2 id="product-group-${index}">${esc(group.name)}</h2><span class="muted">Позиций: ${group.products.length}</span></div><div class="products">${group.products.map(p=>{
     const qty=state.cart[p.id]||0,disabled=(!isOpen(s)&&!state.preview)||p.stock<=0;
     return `<article class="product ${qty?'selected':''}" data-product="${esc(p.id)}">${photo(p)}<div><span class="sku">АРТ. ${esc(p.sku)}</span><p class="product-title">${esc(p.name)}</p><span class="price">${money(p.price)}</span><div class="stock">${p.stock>0?`В наличии ${p.stock} шт.`:'Нет в наличии'}</div></div><div class="product-bottom"><span class="muted" style="font-size:13px">Количество</span><div class="stepper"><button data-step="-1" data-id="${esc(p.id)}" aria-label="Уменьшить количество" ${disabled?'disabled':''}>−</button><input data-qty="${esc(p.id)}" type="number" inputmode="numeric" min="0" max="${p.stock}" value="${qty}" aria-label="Количество ${esc(p.sku)}" ${disabled?'disabled':''}><button data-step="1" data-id="${esc(p.id)}" aria-label="Увеличить количество" ${disabled?'disabled':''}>+</button></div></div></article>`;
-  }).join(''):'<p class="empty">Ничего не найдено.</p>';
+  }).join('')}</div></section>`).join(''):'<p class="empty">Ничего не найдено.</p>';
   document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>setQuantity(b.dataset.id,(state.cart[b.dataset.id]||0)+Number(b.dataset.step)));
   document.querySelectorAll('[data-qty]').forEach(input=>input.onchange=()=>setQuantity(input.dataset.qty,Number(input.value)));
   hydrateImages();
@@ -264,7 +270,7 @@ function editShipment(existing){
       if(controller.signal.aborted||!form.isConnected)return;
       products=result.products;warnings=result.warnings;
       if(!form.elements.title.value)form.elements.title.value=file.name.replace(/\.xlsx?$/i,'');
-      $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image).length} фотографий</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Кол-во</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
+      $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image).length} фотографий</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Кол-во</th><th>Цена</th></tr></thead><tbody>${groupProducts(products).map(group=>`<tr class="import-group"><th colspan="3" scope="rowgroup">${esc(group.name)} · ${group.products.length}</th></tr>${group.products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}`).join('')}</tbody></table></div>`;
       form.querySelectorAll('[data-import-price]').forEach(input=>input.oninput=()=>{const product=products.find(p=>p.id===input.dataset.importPrice);product.price=input.value.trim()&&input.validity.valid?Math.round(Number(input.value)*100):null;});
       $('#save-shipment').disabled=false;
     }catch(e){if(controller.signal.aborted||!form.isConnected)return;products=null;$('#import-info').textContent='';$('#import-error').textContent=e.message;}

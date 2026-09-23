@@ -113,5 +113,32 @@ try{
   await page.setViewportSize({width:1440,height:1000});await page.locator('[data-view="shipments"]').click();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.screenshot({path:'test-results/desktop.png',fullPage:true});
+  // Existing arrivals are grouped on display, with a shared cart across type filters.
+  store.inventory.importShipment({id:'grouped',title:'Смешанный файл',brand:'WIWU',status:'arrived',products:[
+    {id:'g1',sku:'g1',name:'Чехол конверт Air',stock:5,price:10000},
+    {id:'g2',sku:'g2',name:'Защитный чехол Pro',stock:3,price:20000},
+    {id:'g3',sku:'g3',name:'Защитная пленка iPad',stock:8,price:30000},
+    {id:'g4',sku:'g4',name:'Чехол конверт Pro',stock:4,price:40000}
+  ]});
+  await page.locator('#refresh').click();await page.waitForSelector('[data-shipment="grouped"]');
+  await page.locator('[data-shipment="grouped"]').click();
+  assert.deepEqual(await page.locator('.group-heading h2').allTextContents(),['Чехол конверт','Защитный чехол','Защитная плёнка']);
+  assert.deepEqual(await page.locator('[data-product]').evaluateAll(nodes=>nodes.map(n=>n.dataset.product)),['g1','g4','g2','g3']);
+  await page.locator('[data-step="1"][data-id="g1"]').click();
+  await page.locator('#product-group').selectOption('Защитная плёнка');
+  assert.equal(await page.locator('[data-product]').count(),1);
+  await page.locator('[data-step="1"][data-id="g3"]').click();
+  await page.locator('#product-search').fill('no-match');await page.waitForSelector('#products .empty');
+  await page.locator('#product-search').fill('');await page.waitForSelector('[data-product="g3"]');
+  await page.locator('#product-group').selectOption('');
+  assert.equal(await page.locator('[data-qty="g1"]').inputValue(),'1');
+  assert.equal(await page.locator('[data-qty="g3"]').inputValue(),'1');
+  await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.screenshot({path:'test-results/grouped-products.png',fullPage:true});
+  await page.locator('#open-cart').click();
+  assert.equal(await page.locator('.cart-line').count(),2);
+  assert.match(await page.locator('.cart-total').textContent(),/2 шт/);
+  await page.locator('#close-dialog').click();
   assert.deepEqual(errors,[]);console.log('Browser checks passed: mobile, order, cancellation, Excel import/export, desktop.');
 }finally{await browser?.close();await new Promise(r=>server.close(r));}
