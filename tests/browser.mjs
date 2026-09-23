@@ -91,13 +91,13 @@ try{
   const values=[['Наименование','Артикул','Кол-во','Опт.'],['Тестовый товар','test-1','5','150']];
   z.file('xl/worksheets/sheet1.xml',`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${values.map((r,i)=>`<row r="${i+1}">${r.map((v,j)=>`<c r="${String.fromCharCode(65+j)}${i+1}" t="inlineStr"><is><t>${v}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`);
   await page.locator('#xlsx-file').setInputFiles({name:'Test.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await z.generateAsync({type:'nodebuffer'})});
-  await page.waitForSelector('#accept-warnings');await page.locator('#accept-warnings').check();await page.locator('#save-shipment').click();
+  await page.waitForSelector('#accept-warnings');await page.locator('#accept-warnings').check();await page.locator('#accept-groups').check();await page.locator('#save-shipment').click();
   await page.waitForSelector('.admin-row:nth-child(2)');assert.equal(store.inventory.catalog(true).length,2);
   // Binary XLS goes through the worker. Empty prices must be filled before Save.
   await page.locator('#new-shipment').click();
   await page.locator('#xlsx-file').setInputFiles({name:'Legacy.xls',mimeType:'application/vnd.ms-excel',buffer:legacyFixture()});
   await page.waitForSelector('[data-import-price="xls-1"]');
-  await page.locator('#accept-warnings').check();await page.locator('#save-shipment').click();
+  await page.locator('#accept-warnings').check();await page.locator('#accept-groups').check();await page.locator('#save-shipment').click();
   assert.equal(store.inventory.catalog(true).length,2);
   await page.locator('[data-import-price="xls-1"]').fill('199.90');await page.locator('#save-shipment').click();
   await page.waitForSelector('.admin-row:nth-child(3)');
@@ -142,5 +142,54 @@ try{
   assert.equal(await page.locator('.cart-line').count(),2);
   assert.match(await page.locator('.cart-total').textContent(),/2 шт/);
   await page.locator('#close-dialog').click();
+  // Full proposal -> review -> save -> reload -> reimport cycle.
+  await page.reload();await page.waitForSelector('.shipment-card');
+  await page.locator('#admin-tab').click();await page.locator('#new-shipment').click();
+  const mixedRows=[['Наименование','Код','Доступно','Цена продажи'],
+    ['Защитное стекло iPhone 15 матовое','a1','5','150'],
+    ['Защитное стекло iPhone 16 антишпион','a2','6','200'],
+    ['Защитное стекло iPhone 15 керамическое','a3','7','250'],
+    ['Защитное стекло iPhone 16 глянцевое','a4','8','300'],
+    ['Провод USB-C 1м','a5','9','350'],
+    ['Аккумулятор WiWU 10000mAh','a6','10','400'],
+    ['Зубная щетка дорожная Sonic','a7','11','450']];
+  z.file('xl/worksheets/sheet1.xml',`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${mixedRows.map((r,i)=>`<row r="${i+1}">${r.map((v,j)=>`<c r="${String.fromCharCode(65+j)}${i+1}" t="inlineStr"><is><t>${v}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`);
+  const mixedFile={name:'Analysis.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await z.generateAsync({type:'nodebuffer'})};
+  await page.locator('#xlsx-file').setInputFiles(mixedFile);
+  await page.waitForSelector('[data-product-group="a1"]');
+  assert.equal(await page.locator('[data-product-group="a1"]').inputValue(),'Защитное стекло');
+  assert.equal(await page.locator('[data-product-subgroup="a2"]').inputValue(),'Антишпион');
+  assert.equal(await page.locator('[data-product-group="a5"]').inputValue(),'Кабель');
+  const countBeforeReview=store.inventory.catalog(true).length;
+  await page.locator('#accept-warnings').check();await page.locator('#save-shipment').click();
+  assert.match(await page.locator('#import-error').textContent(),/Группы и подгруппы проверены/);
+  assert.equal(store.inventory.catalog(true).length,countBeforeReview);
+  await page.locator('[data-group-renames]').locator('..').locator('summary').click();
+  await page.locator('[data-rename-input="0"]').fill('Стёкла для телефонов');
+  await page.locator('[data-rename-group="0"]').click();
+  assert.equal(await page.locator('[data-product-group="a4"]').inputValue(),'Стёкла для телефонов');
+  await page.locator('[data-product-group="a5"]').fill('Кабели и переходники');
+  await page.locator('[data-product-subgroup="a5"]').fill('USB-C');
+  await page.locator('[data-product-group="a7"]').fill('Уход');
+  await page.locator('#accept-groups').check();
+  assert.equal(await page.evaluate(()=>document.querySelector('#dialog').scrollWidth>document.querySelector('#dialog').clientWidth),false);
+  await page.screenshot({path:'test-results/group-review.png',fullPage:true});
+  await page.locator('#save-shipment').click();await page.waitForSelector('#shipment-form',{state:'hidden'});
+  const analyzed=store.inventory.catalog(true).find(s=>s.title==='Analysis');
+  assert.equal(analyzed.products.find(p=>p.id==='a5').subgroup,'USB-C');
+  assert.equal(analyzed.products.find(p=>p.id==='a7').group,'Уход');
+  await page.reload();await page.waitForSelector(`[data-shipment="${analyzed.id}"]`);
+  await page.locator(`[data-shipment="${analyzed.id}"]`).click();
+  assert((await page.locator('.group-heading h2').allTextContents()).includes('Стёкла для телефонов'));
+  assert.deepEqual((await page.locator('.product-subgroup h3').allTextContents()).slice(0,4),['Матовое','Антишпион','Керамическое','Глянцевое']);
+  await page.locator('#product-search').fill('a2');await page.waitForSelector('[data-product="a1"]',{state:'detached'});
+  assert.equal(await page.locator('.product-subgroup h3').textContent(),'Антишпион');
+  await page.locator('#admin-tab').click();await page.locator(`[data-edit="${analyzed.id}"]`).click();
+  await page.locator('#xlsx-file').setInputFiles(mixedFile);await page.waitForSelector('[data-product-group="a5"]');
+  assert.equal(await page.locator('[data-product-group="a5"]').inputValue(),'Кабели и переходники');
+  assert.equal(await page.locator('[data-product-subgroup="a5"]').inputValue(),'USB-C');
+  await page.locator('#accept-warnings').check();await page.locator('#accept-groups').check();
+  await page.locator('#save-shipment').click();await page.waitForSelector('#shipment-form',{state:'hidden'});
+  assert.equal(store.inventory.catalog(true).find(s=>s.id===analyzed.id).products.find(p=>p.id==='a1').stock,5);
   assert.deepEqual(errors,[]);console.log('Browser checks passed: mobile, order, cancellation, Excel import/export, desktop.');
 }finally{await browser?.close();await new Promise(r=>server.close(r));}
