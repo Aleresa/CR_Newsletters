@@ -2,9 +2,10 @@
 const normalize = value => String(value ?? '').trim().toLowerCase().replace(/ё/g,'е').replace(/[.\s_-]+/g,'');
 const aliases = {
   name:['наименование','наименованиетовара','название','названиетовара'],
-  sku:['артикул','кодтовара','код'],
-  stock:['колво','количество','остаток'],
-  price:['опт','оптоваяцена','ценашт','ценазашт','цена'],
+  // Stock-report columns take priority when legacy columns are also present.
+  sku:['код','кодтовара','артикул'],
+  stock:['доступно','колво','количество','остаток'],
+  price:['ценапродажи','опт','оптоваяцена','ценашт','ценазашт','цена'],
   unit:['едизм','единицаизмерения']
 };
 const numeric = value => Number(String(value ?? '').replace(/\s/g,'').replace(',','.'));
@@ -15,7 +16,7 @@ export function parseSupplierRows(rows) {
     const columns=Object.fromEntries(Object.entries(aliases).map(([field,names])=>[field,names.map(name=>entries.find(([,value])=>value===name)?.[0]).find(column=>column!==undefined)]));
     if (columns.name!==undefined && columns.sku!==undefined && columns.stock!==undefined && columns.price!==undefined) {header={number,columns};break;}
   }
-  if (!header) throw Error('Нужны столбцы Наименование, Артикул, Кол-во и Опт или Цена шт. Порядок не важен.');
+  if (!header) throw Error('Нужны столбцы Код, Наименование, Доступно и Цена продажи. Также поддерживаются Артикул, Кол-во и Опт / Цена шт. Порядок не важен.');
   const {columns:c}=header,products=[],warnings=[],rowProducts=new Map(),seen=new Set();
   for (const [number,row] of rows) {
     const name=String(row[c.name]??'').trim(),sku=String(row[c.sku]??'').trim();
