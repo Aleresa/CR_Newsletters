@@ -113,6 +113,7 @@ try{
   await page.setViewportSize({width:1440,height:1000});await page.locator('[data-view="shipments"]').click();
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.screenshot({path:'test-results/desktop.png',fullPage:true});
+  await page.locator('#back').click();await page.waitForSelector('.shipment-card');
   // Existing arrivals are grouped on display, with a shared cart across type filters.
   store.inventory.importShipment({id:'grouped',title:'Смешанный файл',brand:'WIWU',status:'arrived',products:[
     {id:'g1',sku:'g1',name:'Чехол конверт Air',stock:5,price:10000},
