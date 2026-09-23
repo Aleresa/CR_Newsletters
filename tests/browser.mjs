@@ -138,6 +138,7 @@ try{
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.screenshot({path:'test-results/grouped-products.png',fullPage:true});
   await page.locator('#open-cart').click();
+  await page.waitForSelector('.cart-line');
   assert.equal(await page.locator('.cart-line').count(),2);
   assert.match(await page.locator('.cart-total').textContent(),/2 шт/);
   await page.locator('#close-dialog').click();
