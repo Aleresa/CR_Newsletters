@@ -7,8 +7,8 @@ export function legacyFixture() {
   XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([
     ['Synthetic purchase order'],[],
     ['Кол-во','Изображение','Цена шт','Наименование товара','Артикул','Код'],
-    [5,'','','Test legacy product','xls-1','other-code'],
-    [2,'',123.45,'Test priced product','xls-2','other-code-2']
+    [5,'','','Test legacy product','other-article','xls-1'],
+    [2,'',123.45,'Test priced product','other-article-2','xls-2']
   ]),'Test');
   return Buffer.from(XLSX.write(workbook,{type:'array',bookType:'biff8'}));
 }

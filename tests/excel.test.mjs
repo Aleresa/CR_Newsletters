@@ -22,6 +22,39 @@ test('shared Excel validator handles spaces and totals without inventing stock o
   rows.get(2).D='';assert.throws(()=>parseSupplierRows(rows),/количество/);
   rows.get(2).D=1;rows.get(2).C='ошибка';assert.throws(()=>parseSupplierRows(rows),/цену/);
 });
+test('stock-report XLS imports Code, Available and Sales price instead of competing columns',()=>{
+  const workbook=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([
+    ['Остатки товаров'],[],
+    ['Артикул','Наименование','Остаток','Цена','Код','Изображение','Доступно','Резерв','Цена Продажи','Сумма продажи'],
+    ['OTHER','Товар А',99,9999,'00123','',7,92,1400,14000],
+    ['OTHER','Товар Б',11,800,'00456','',0,11,0,8800],
+    ['', 'Итого:',110,'','','',7,103,'',22800]
+  ]),'Лист1');
+  const bytes=XLSX.write(workbook,{type:'array',bookType:'biff8'});
+  const book=XLSX.read(bytes,{type:'array'}),sheet=book.Sheets[book.SheetNames[0]],rows=new Map();
+  for(const [address,cell] of Object.entries(sheet)){
+    if(!/^[A-Z]+\d+$/.test(address))continue;
+    const {r,c}=XLSX.utils.decode_cell(address);
+    if(!rows.has(r+1))rows.set(r+1,{});
+    rows.get(r+1)[c]=cell.t==='n'?(cell.w??cell.v):(cell.v??'');
+  }
+  const result=parseSupplierRows(rows);
+  assert.deepEqual(result.products.map(({sku,name,stock,price})=>({sku,name,stock,price})),[
+    {sku:'00123',name:'Товар А',stock:7,price:140000},
+    {sku:'00456',name:'Товар Б',stock:0,price:0}
+  ]);
+  assert.equal(result.warnings.length,0);
+  assert.equal(result.rowProducts.get(4).sku,'00123');
+});
+test('stock-report headings tolerate case and spaces; empty sale price never falls back to another price',()=>{
+  const rows=new Map([[1,{A:' КОД ',B:'Наименование',C:' ДОСТУПНО ',D:'Цена\u00a0Продажи',E:'Цена'}],
+    [2,{A:'00123',B:'Товар',C:'2,00',D:'',E:500}]]);
+  const result=parseSupplierRows(rows);
+  assert.equal(result.products[0].price,null);
+  assert.equal(result.products[0].stock,2);
+  assert.match(result.warnings[0],/цена не заполнена/);
+});
 function art(type,body,flags=0){const h=Buffer.alloc(8);h.writeUInt16LE(flags);h.writeUInt16LE(type,2);h.writeUInt32LE(body.length,4);return Buffer.concat([h,body]);}
 function biff(type,body){const h=Buffer.alloc(4);h.writeUInt16LE(type);h.writeUInt16LE(body.length,2);return Buffer.concat([h,body]);}
 test('legacy drawings map pictures to anchors, support continuations and exclude a second sheet',()=>{
