@@ -1,5 +1,5 @@
 import {readSupplierExcel,exportOrders} from './xlsx.js';
-import {groupProducts,proposeGroups} from './product-groups.js';
+import {groupProducts,proposeGroups,groupKey} from './product-groups.js';
 import {mountGroupEditor} from './group-editor.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
@@ -93,7 +93,7 @@ function openShipment(id){if(state.current!==id){state.cart={};state.requestKey=
 function renderDetail(){
   const s=activeShipment();if(!s){state.current=null;render();return;}
   const groups=groupProducts(s.products);
-  if(!groups.some(g=>g.name===state.productGroup))state.productGroup='';
+  state.productGroup=groups.find(g=>groupKey(g.name)===groupKey(state.productGroup))?.name||'';
   app.innerHTML=`<button class="back" id="back">← Все поступления</button><section class="detail-head">${badge(s.status)}<h1>${esc(s.title)}</h1>${s.description?`<p class="subtitle">${esc(s.description).replaceAll('\n','<br>')}</p>`:''}<div class="detail-meta"><span>Дата поступления<strong>${date(s.eta)}</strong></span><span>Позиций<strong>${s.products.length}</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"><select id="product-group" aria-label="Тип товара"><option value="">Все типы товаров</option>${groups.map(g=>`<option value="${esc(g.name)}">${esc(g.name)} (${g.products.length})</option>`).join('')}</select></div><div class="product-groups" id="products"></div>`;
   $('#product-group').value=state.productGroup;
   $('#product-group').onchange=e=>{state.productGroup=e.target.value;products($('#product-search').value);};
@@ -101,7 +101,7 @@ function renderDetail(){
 }
 function products(query){
   const s=activeShipment(),list=proposeGroups(s.products).filter(p=>`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase()));
-  const groups=groupProducts(list).filter(g=>!state.productGroup||g.name===state.productGroup);
+  const groups=groupProducts(list).filter(g=>!state.productGroup||groupKey(g.name)===groupKey(state.productGroup));
   $('#products').innerHTML=groups.length?groups.map((group,index)=>`<section class="product-group" aria-labelledby="product-group-${index}"><div class="group-heading"><h2 id="product-group-${index}">${esc(group.name)}</h2><span class="muted">Позиций: ${group.products.length}</span></div>${group.subgroups.map(subgroup=>`<div class="product-subgroup">${subgroup.name||group.subgroups.length>1?`<h3>${esc(subgroup.name||'Без подгруппы')}</h3>`:''}<div class="products">${subgroup.products.map(p=>{
     const qty=state.cart[p.id]||0,disabled=(!isOpen(s)&&!state.preview)||p.stock<=0;
     return `<article class="product ${qty?'selected':''}" data-product="${esc(p.id)}">${photo(p)}<div><span class="sku">АРТ. ${esc(p.sku)}</span><p class="product-title">${esc(p.name)}</p><span class="price">${money(p.price)}</span><div class="stock">${p.stock>0?`В наличии ${p.stock} шт.`:'Нет в наличии'}</div></div><div class="product-bottom"><span class="muted" style="font-size:13px">Количество</span><div class="stepper"><button data-step="-1" data-id="${esc(p.id)}" aria-label="Уменьшить количество" ${disabled?'disabled':''}>−</button><input data-qty="${esc(p.id)}" type="number" inputmode="numeric" min="0" max="${p.stock}" value="${qty}" aria-label="Количество ${esc(p.sku)}" ${disabled?'disabled':''}><button data-step="1" data-id="${esc(p.id)}" aria-label="Увеличить количество" ${disabled?'disabled':''}>+</button></div></div></article>`;

@@ -49,3 +49,9 @@ test('ambiguous names remain reviewable, explicit edits survive reimport by ID',
   const blank=proposeGroups(items,[{...saved[0],subgroup:''}])[0];assert.equal(blank.subgroup,'');
   assert.equal(groupProducts([{...items[0],group:'Стёкла',subgroup:'Матовые'},{...items[1],group:'стекла',subgroup:'матовые'}]).length,1);
 });
+
+test('suggests distinct series from shared brand signatures even for a single item of each type',()=>{
+  const products=proposeGroups(named(['Защитное стекло Gurdini Basic iPhone 15','Защитное стекло Gurdini Premium iPhone 16','Защитное стекло Gurdini Privacy iPhone 15','Защитное стекло Gurdini Matte iPhone 16']));
+  assert.deepEqual(products.map(p=>p.subgroup),['Gurdini basic','Gurdini premium','Антишпион','Матовое']);
+  assert(products[0].groupingNeedsReview);
+});

@@ -1,6 +1,7 @@
 // Local name analysis: proposals are editable, not authoritative classifications.
 const clean=value=>String(value??'').trim().replace(/\s+/g,' ');
 const norm=value=>clean(value).toLowerCase().replaceAll('ё','е').replace(/[‐‑–—]/g,'-');
+export const groupKey=norm;
 const title=value=>value.charAt(0).toUpperCase()+value.slice(1);
 const families=[
   ['Чехол конверт',/чехол[\s-]+конверт/u],
@@ -62,13 +63,14 @@ export function proposeGroups(products,previous=[]){
     else {const common=roots.get(root),parts=info.name.split(' ');let n=0;while(n<common.length&&norm(common[n])===norm(parts[n]??''))n++;roots.set(root,common.slice(0,n));}
   }
   for(const info of infos.filter(i=>!i.known))info.name=roots.get(norm(info.name).split(' ')[0]).join(' ');
-  const candidates=products.map((p,i)=>series(p.name,infos[i])),counts=new Map();
-  candidates.forEach((c,i)=>{const key=norm(infos[i].name)+'\0'+norm(c.name);counts.set(key,(counts.get(key)||0)+1);});
+  const candidates=products.map((p,i)=>series(p.name,infos[i])),counts=new Map(),tokens=new Map();
+  candidates.forEach((c,i)=>{const familyKey=norm(infos[i].name)+'\0',key=familyKey+norm(c.name);counts.set(key,(counts.get(key)||0)+1);for(const token of new Set(norm(c.name).split(' ').filter(Boolean)))tokens.set(familyKey+token,(tokens.get(familyKey+token)||0)+1);});
   return products.map((p,i)=>{
     const old=clean(p.group)?p:saved.get(p.id),info=infos[i],candidate=candidates[i];
     if(old)return {...p,group:clean(old.group),subgroup:clean(old.subgroup),groupingNote:'Сохранённая группа',groupingNeedsReview:false};
-    const subgroup=candidate.name&&(candidate.strong||counts.get(norm(info.name)+'\0'+norm(candidate.name))>=2)?candidate.name:'';
-    return {...p,group:info.name,subgroup,groupingNeedsReview:!info.known||!subgroup,
+    const sharedSignature=candidate.name.split(' ').length>1&&candidate.name.split(' ').some(t=>tokens.get(norm(info.name)+'\0'+norm(t))>=2);
+    const subgroup=candidate.name&&(candidate.strong||counts.get(norm(info.name)+'\0'+norm(candidate.name))>=2||sharedSignature)?candidate.name:'';
+    return {...p,group:info.name,subgroup,groupingNeedsReview:!info.known||!candidate.strong,
       groupingNote:!info.known?'Группа по общему началу названия — проверьте':subgroup?'Подгруппа по типу, серии или повторяющейся части названия':'Тип найден; подгруппа не определена'};
   });
 }

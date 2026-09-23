@@ -5,8 +5,7 @@ export function mountGroupEditor(container,products){
   function render(){
     container.innerHTML=`<section class="group-review"><h3>Группы по названиям товаров</h3><p class="fine-print">Проверьте предложенные группы и подгруппы. В поле группы можно выбрать существующую или написать новую. Одинаковые названия объединяются. Пустая подгруппа допустима.</p><div data-group-summary aria-live="polite"></div><details><summary>Переименовать целую группу</summary><div data-group-renames></div></details><datalist id="import-group-names"></datalist><datalist id="import-subgroup-names"></datalist><details open><summary>Проверить товары и изменить распределение</summary><div class="group-editor-products">${products.map((p,i)=>`<article class="group-editor-product"><strong>${esc(p.name)}</strong><small class="muted">Артикул ${esc(p.sku)}${p.groupingNeedsReview?' · Проверьте распределение':''}</small><p class="fine-print">${esc(p.groupingNote||'')}</p><div class="form-grid"><label class="field">Группа<input data-product-group="${esc(p.id)}" data-index="${i}" list="import-group-names" required maxlength="80" value="${esc(p.group)}"></label><label class="field">Подгруппа<input data-product-subgroup="${esc(p.id)}" data-index="${i}" list="import-subgroup-names" maxlength="80" value="${esc(p.subgroup)}" placeholder="Без подгруппы"></label></div></article>`).join('')}</div></details></section>`;
     container.querySelectorAll('[data-product-group],[data-product-subgroup]').forEach(input=>{
-      input.oninput=()=>{const p=products[Number(input.dataset.index)],field=input.hasAttribute('data-product-group')?'group':'subgroup';p[field]=input.value.trim();};
-      input.onchange=summary;
+      input.oninput=()=>{const p=products[Number(input.dataset.index)],field=input.hasAttribute('data-product-group')?'group':'subgroup';p[field]=input.value.trim();summary();};
     });
     summary();
   }
