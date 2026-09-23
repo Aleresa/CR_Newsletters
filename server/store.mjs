@@ -1,4 +1,5 @@
 import {ApiError} from './auth.mjs';
+import {groupKey} from '../public/product-groups.js';
 
 const ACTIVE = new Set(['arrived']);
 const STATUSES = new Set(['draft','arrived','closed']);
@@ -38,7 +39,14 @@ export class Inventory {
     });
   }
   catalog(admin=false) {
-    return this.rows('SELECT data FROM shipments').map(r=>JSON.parse(r.data)).filter(s=>admin || s.status !== 'draft').map(s=>({...s,products:this.rows('SELECT * FROM products WHERE shipment=?',s.id).map(p=>({...JSON.parse(p.data),stock:p.total-p.placed,...(admin?{total:p.total,placed:p.placed}:{})}))}));
+    return this.rows('SELECT data FROM shipments').map(r=>JSON.parse(r.data)).filter(s=>admin || s.status !== 'draft').map(s=>{
+      const groups=s.groupingMode==='manual'?(s.groups||[]):[];
+      const products=this.rows('SELECT * FROM products WHERE shipment=? ORDER BY rowid',s.id).map((row,index)=>{
+        const {subgroup,group,...p}=JSON.parse(row.data);
+        return {...p,group:groups.find(g=>groupKey(g)===groupKey(group))||'',position:p.position??index,stock:row.total-row.placed,...(admin?{total:row.total,placed:row.placed}:{})};
+      }).sort((a,b)=>a.position-b.position);
+      return {...s,groups,products};
+    });
   }
   deleteShipment(id) {
     if(!validId(id))throw new ApiError(400,'Некорректное поступление.');
@@ -57,18 +65,24 @@ export class Inventory {
     for (const d of [input.eta,input.publishedAt]) if (d != null && d !== '' && (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !Number.isFinite(Date.parse(d)) || new Date(d).toISOString().slice(0,10)!==d)) throw new ApiError(400,'Некорректная дата.');
     const old = this.one('SELECT data FROM shipments WHERE id=?',input.id);
     const previous = old ? JSON.parse(old.data) : null;
-    const shipment = {id:input.id,title:trim(input.title,160),brand:trim(input.brand,80),description:trim(input.description,3000),status:input.status,eta:input.eta || null,
+    if(input.groupingMode!==undefined&&input.groupingMode!=='manual')throw new ApiError(400,'Некорректный режим групп.');
+    const groups=input.groupingMode==='manual'?(input.groups??[]):[];
+    if(!Array.isArray(groups)||groups.length>100||groups.some(g=>typeof g!=='string'||!g.trim()||g.length>80)||new Set(groups.map(groupKey)).size!==groups.length)throw new ApiError(400,'Укажите до 100 групп с уникальными названиями до 80 символов.');
+    const groupNames=groups.map(g=>g.trim().replace(/\s+/g,' '));
+    const shipment = {id:input.id,title:trim(input.title,160),brand:trim(input.brand,80),description:trim(input.description,3000),status:input.status,groupingMode:'manual',groups:groupNames,eta:input.eta || null,
       publishedAt:input.publishedAt || previous?.publishedAt || (input.status === 'draft'?null:new Date().toISOString().slice(0,10))};
     const ids = new Set();
-    const products = input.products.map(p=>{
+    const products = input.products.map((p,position)=>{
       const total=p.total ?? p.stock;
       if (!validId(p.id) || ids.has(p.id) || !trim(p.name,500) || !Number.isSafeInteger(total) || total<0 || total>10000000 || !Number.isSafeInteger(p.price) || p.price<0 || p.price>100000000) throw new ApiError(400,'В товарах есть некорректный артикул, количество, цена или дубликат.');
       ids.add(p.id);
       if (p.image && (!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(p.image) || p.image.length>180000)) throw new ApiError(400,'Некорректное изображение.');
       if (p.imageKey && !/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(p.imageKey)) throw new ApiError(400,'Некорректное изображение.');
-      for(const field of ['group','subgroup'])if(p[field]!==undefined&&(typeof p[field]!=='string'||p[field].length>80))throw new ApiError(400,'Название группы или подгруппы должно быть строкой до 80 символов.');
-      if(p.subgroup?.trim()&&!p.group?.trim())throw new ApiError(400,'Для подгруппы укажите группу.');
-      return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),group:trim(p.group,80),subgroup:trim(p.subgroup,80),price:p.price,unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,total};
+      if(input.groupingMode==='manual'&&p.group!==undefined&&(typeof p.group!=='string'||p.group.length>80))throw new ApiError(400,'Некорректная группа товара.');
+      const group=input.groupingMode==='manual'?trim(p.group,80):'';
+      const groupName=groupNames.find(g=>groupKey(g)===groupKey(group));
+      if(group&&!groupName)throw new ApiError(400,'Сначала создайте группу для товара.');
+      return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),group:groupName||'',position,price:p.price,unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,total};
     });
     return this.transaction(()=>{
       const current=this.rows('SELECT id,placed FROM products WHERE shipment=?',shipment.id);

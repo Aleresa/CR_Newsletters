@@ -1,27 +1,22 @@
-import {groupProducts} from './product-groups.js';
+import {groupKey} from './product-groups.js';
 const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
-const key=value=>String(value??'').trim().toLowerCase().replaceAll('ё','е').replace(/\s+/g,' ');
-export function mountGroupEditor(container,products){
+export function mountGroupEditor(container,products,groups){
   function render(){
-    container.innerHTML=`<section class="group-review"><h3>Группы по названиям товаров</h3><p class="fine-print">Проверьте предложенные группы и подгруппы. В поле группы можно выбрать существующую или написать новую. Одинаковые названия объединяются. Пустая подгруппа допустима.</p><div data-group-summary aria-live="polite"></div><details><summary>Переименовать целую группу</summary><div data-group-renames></div></details><datalist id="import-group-names"></datalist><datalist id="import-subgroup-names"></datalist><details open><summary>Проверить товары и изменить распределение</summary><div class="group-editor-products">${products.map((p,i)=>`<article class="group-editor-product"><strong>${esc(p.name)}</strong><small class="muted">Артикул ${esc(p.sku)}${p.groupingNeedsReview?' · Проверьте распределение':''}</small><p class="fine-print">${esc(p.groupingNote||'')}</p><div class="form-grid"><label class="field">Группа<input data-product-group="${esc(p.id)}" data-index="${i}" list="import-group-names" required maxlength="80" value="${esc(p.group)}"></label><label class="field">Подгруппа<input data-product-subgroup="${esc(p.id)}" data-index="${i}" list="import-subgroup-names" maxlength="80" value="${esc(p.subgroup)}" placeholder="Без подгруппы"></label></div></article>`).join('')}</div></details></section>`;
-    container.querySelectorAll('[data-product-group],[data-product-subgroup]').forEach(input=>{
-      input.oninput=()=>{const p=products[Number(input.dataset.index)],field=input.hasAttribute('data-product-group')?'group':'subgroup';p[field]=input.value.trim();summary();};
-    });
-    summary();
-  }
-  function summary(){
-    const groups=groupProducts(products);
-    container.querySelector('[data-group-summary]').innerHTML=`<p class="fine-print">Групп: ${groups.length}</p><div class="group-summary">${groups.map(g=>`<span>${esc(g.name)} · ${g.products.length}${g.subgroups.some(s=>s.name)?`<small>${g.subgroups.map(s=>`${esc(s.name||'Без подгруппы')}: ${s.products.length}`).join(' · ')}</small>`:''}</span>`).join('')}</div>`;
-    container.querySelector('#import-group-names').innerHTML=groups.map(g=>`<option value="${esc(g.name)}"></option>`).join('');
-    container.querySelector('#import-subgroup-names').innerHTML=[...new Set(products.map(p=>p.subgroup).filter(Boolean))].map(name=>`<option value="${esc(name)}"></option>`).join('');
-    const renames=container.querySelector('[data-group-renames]');
-    renames.innerHTML=groups.map((g,i)=>`<div class="group-rename"><label class="field">${esc(g.name)} · ${g.products.length}<input data-rename-input="${i}" maxlength="80" value="${esc(g.name)}" aria-label="Новое название ${esc(g.name)}"></label><button type="button" class="secondary" data-rename-group="${i}">Применить</button></div>`).join('');
-    renames.querySelectorAll('[data-rename-group]').forEach(button=>button.onclick=()=>{
-      const index=Number(button.dataset.renameGroup),input=renames.querySelector(`[data-rename-input="${index}"]`),value=input.value.trim();
-      if(!value){input.focus();return;}
-      for(const p of products)if(key(p.group)===key(groups[index].name))p.group=value;
-      render();
-    });
+    container.innerHTML=`<section class="group-review"><h3>Группы товаров — необязательно</h3><p class="fine-print">Создайте группы и выберите группу у нужных товаров. Без распределения товары будут показаны в порядке файла, без групп и фильтров.</p><div class="group-create"><label class="field">Название новой группы<input id="new-product-group" maxlength="80" placeholder="Например, Кабели"></label><button type="button" class="secondary" id="add-product-group">Создать группу</button></div><p class="error" data-group-error role="alert"></p><div class="group-list">${groups.map((g,i)=>`<div class="group-rename"><label class="field">Группа<input data-rename-input="${i}" maxlength="80" value="${esc(g)}"></label><button type="button" class="secondary" data-rename-group="${i}" aria-label="Переименовать ${esc(g)}">Сохранить</button><button type="button" class="danger" data-delete-group="${i}" aria-label="Удалить ${esc(g)}">Удалить</button></div>`).join('')}</div>${groups.length?`<button type="button" class="secondary" id="clear-product-groups">Убрать все группы</button><div class="group-editor-products">${products.map((p,i)=>`<article class="group-editor-product"><strong>${esc(p.name)}</strong><small class="muted">Артикул ${esc(p.sku)}</small><label class="field">Группа<select data-product-group="${esc(p.id)}" data-index="${i}"><option value="">Без группы</option>${groups.map(g=>`<option value="${esc(g)}" ${groupKey(g)===groupKey(p.group)?'selected':''}>${esc(g)}</option>`).join('')}</select></label></article>`).join('')}</div>`:'<p class="fine-print">Групп пока нет. Можно сразу сохранить поступление.</p>'}</section>`;
+    const error=container.querySelector('[data-group-error]');
+    function nameFrom(input,index=-1){
+      const value=input.value.trim().replace(/\s+/g,' ');
+      if(!value){error.textContent='Введите название группы.';input.focus();return;}
+      if(groups.some((g,i)=>i!==index&&groupKey(g)===groupKey(value))){error.textContent='Группа с таким названием уже есть.';return;}
+      return value;
+    }
+    const add=()=>{const name=nameFrom(container.querySelector('#new-product-group'));if(!name)return;if(groups.length>=100){error.textContent='Можно создать до 100 групп.';return;}groups.push(name);render();};
+    container.querySelector('#add-product-group').onclick=add;
+    container.querySelector('#new-product-group').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();add();}};
+    container.querySelectorAll('[data-product-group]').forEach(select=>select.onchange=()=>products[Number(select.dataset.index)].group=select.value);
+    container.querySelectorAll('[data-rename-group]').forEach(button=>button.onclick=()=>{const i=Number(button.dataset.renameGroup),name=nameFrom(container.querySelector(`[data-rename-input="${i}"]`),i);if(!name)return;for(const p of products)if(groupKey(p.group)===groupKey(groups[i]))p.group=name;groups[i]=name;render();});
+    container.querySelectorAll('[data-delete-group]').forEach(button=>button.onclick=()=>{const i=Number(button.dataset.deleteGroup);for(const p of products)if(groupKey(p.group)===groupKey(groups[i]))p.group='';groups.splice(i,1);render();});
+    const clear=container.querySelector('#clear-product-groups');if(clear)clear.onclick=()=>{groups.splice(0);for(const p of products)p.group='';render();};
   }
   render();
 }

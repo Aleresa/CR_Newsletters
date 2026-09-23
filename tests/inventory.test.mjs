@@ -324,17 +324,28 @@ test('shipment deletion requires administrator identity and is transactional',as
   assert.equal((await remove(owner)).status,200);assert.equal(inv.catalog(true).length,0);
 });
 
-test('reviewed groups persist through storage, edits and active orders without changing stock',()=>{
-  const {inv,shipment}=fixture();
-  inv.placeOrder(user,request('group-order',3));
-  shipment.products[0].group='Провода';shipment.products[0].subgroup='USB-C';
+test('manual groups and file order persist without changing active order stock',()=>{
+  const {inv,shipment}=fixture();inv.placeOrder(user,request('group-order',3));
+  shipment.groupingMode='manual';shipment.groups=['Провода'];shipment.products[0].group='Провода';
   inv.importShipment(shipment);
-  let p=inv.catalog(true)[0].products.find(p=>p.id==='p1');
-  assert.equal(p.group,'Провода');assert.equal(p.subgroup,'USB-C');assert.equal(p.stock,7);
-  const reloaded=inv.catalog(true)[0];reloaded.products[0].group='Кабели';inv.importShipment(reloaded);
-  p=inv.catalog()[0].products.find(p=>p.id==='p1');assert.equal(p.group,'Кабели');assert.equal(p.stock,7);
-  for(const fields of [{group:[]},{group:'a'.repeat(81)},{group:'',subgroup:'Тип'},{group:'A',subgroup:123}]){
-    assert.throws(()=>inv.importShipment({...shipment,products:[{...shipment.products[0],...fields},shipment.products[1]]}),/групп/);
-  }
-  assert.equal(inv.catalog()[0].products[0].group,'Кабели');assert.equal(inv.catalog()[0].products[0].stock,7);
+  let p=inv.catalog(true)[0].products.find(p=>p.id==='p1');assert.equal(p.group,'Провода');assert.equal(p.stock,7);
+  const reloaded=inv.catalog(true)[0];reloaded.products.reverse();inv.importShipment(reloaded);
+  assert.deepEqual(inv.catalog()[0].products.map(p=>p.id),['p2','p1']);
+  assert.equal(inv.catalog()[0].products[1].stock,7);
+  for(const group of [[], 'a'.repeat(81),'Несуществующая'])assert.throws(()=>inv.importShipment({...shipment,products:[{...shipment.products[0],group},shipment.products[1]]}),/групп/);
+  const cleared=inv.catalog(true)[0];cleared.groups=[];cleared.products.forEach(p=>p.group='');inv.importShipment(cleared);
+  assert.deepEqual(inv.catalog()[0].products.map(p=>p.id),['p2','p1']);assert.equal(inv.catalog()[0].products[1].stock,7);
+});
+test('default import keeps non-alphabetical file order and ignores old automatic grouping',()=>{
+  const {inv,shipment}=fixture();
+  const products=['z9','a2','m1'].map((id,i)=>({id,sku:id,name:'Защитное стекло '+i,price:100,stock:10,group:'Автогруппа',subgroup:'Подгруппа'}));
+  inv.importShipment({...shipment,products});
+  let result=inv.catalog()[0];assert.deepEqual(result.products.map(p=>p.id),['z9','a2','m1']);assert.deepEqual(result.groups,[]);
+  assert(result.products.every(p=>!p.group&&!('subgroup' in p)));
+  inv.importShipment({...shipment,products:[products[2],products[0],products[1]]});
+  assert.deepEqual(inv.catalog()[0].products.map(p=>p.id),['m1','z9','a2']);
+  // Simulate a stored record from the removed automatic analyzer.
+  inv.sql.exec('UPDATE shipments SET data=? WHERE id=?',JSON.stringify({id:'sample',title:'Old',status:'arrived'}),'sample');
+  inv.sql.exec('UPDATE products SET data=? WHERE shipment=? AND id=?',JSON.stringify({...products[0],position:1}),'sample','z9');
+  result=inv.catalog()[0];assert(result.products.every(p=>!p.group&&!('subgroup' in p)));
 });
