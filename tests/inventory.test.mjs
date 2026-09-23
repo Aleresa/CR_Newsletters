@@ -323,3 +323,18 @@ test('shipment deletion requires administrator identity and is transactional',as
   const owner=signedData(token,{user:JSON.stringify({id:999,first_name:'Owner'})});
   assert.equal((await remove(owner)).status,200);assert.equal(inv.catalog(true).length,0);
 });
+
+test('reviewed groups persist through storage, edits and active orders without changing stock',()=>{
+  const {inv,shipment}=fixture();
+  inv.placeOrder(user,request('group-order',3));
+  shipment.products[0].group='Провода';shipment.products[0].subgroup='USB-C';
+  inv.importShipment(shipment);
+  let p=inv.catalog(true)[0].products.find(p=>p.id==='p1');
+  assert.equal(p.group,'Провода');assert.equal(p.subgroup,'USB-C');assert.equal(p.stock,7);
+  const reloaded=inv.catalog(true)[0];reloaded.products[0].group='Кабели';inv.importShipment(reloaded);
+  p=inv.catalog()[0].products.find(p=>p.id==='p1');assert.equal(p.group,'Кабели');assert.equal(p.stock,7);
+  for(const fields of [{group:[]},{group:'a'.repeat(81)},{group:'',subgroup:'Тип'},{group:'A',subgroup:123}]){
+    assert.throws(()=>inv.importShipment({...shipment,products:[{...shipment.products[0],...fields},shipment.products[1]]}),/групп/);
+  }
+  assert.equal(inv.catalog()[0].products[0].group,'Кабели');assert.equal(inv.catalog()[0].products[0].stock,7);
+});

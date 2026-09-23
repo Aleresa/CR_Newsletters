@@ -66,7 +66,9 @@ export class Inventory {
       ids.add(p.id);
       if (p.image && (!/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(p.image) || p.image.length>180000)) throw new ApiError(400,'Некорректное изображение.');
       if (p.imageKey && !/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(p.imageKey)) throw new ApiError(400,'Некорректное изображение.');
-      return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),price:p.price,unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,total};
+      for(const field of ['group','subgroup'])if(p[field]!==undefined&&(typeof p[field]!=='string'||p[field].length>80))throw new ApiError(400,'Название группы или подгруппы должно быть строкой до 80 символов.');
+      if(p.subgroup?.trim()&&!p.group?.trim())throw new ApiError(400,'Для подгруппы укажите группу.');
+      return {id:p.id,sku:trim(p.sku || p.id,80),name:trim(p.name,500),group:trim(p.group,80),subgroup:trim(p.subgroup,80),price:p.price,unit:trim(p.unit || 'шт',20),image:p.image || null,imageKey:p.imageKey || null,total};
     });
     return this.transaction(()=>{
       const current=this.rows('SELECT id,placed FROM products WHERE shipment=?',shipment.id);
