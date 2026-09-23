@@ -1,5 +1,5 @@
 import {readSupplierExcel,exportOrders} from './xlsx.js';
-import {groupProducts,proposeGroups,groupKey} from './product-groups.js';
+import {groupProducts,manualProducts,groupKey} from './product-groups.js';
 import {mountGroupEditor} from './group-editor.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
@@ -92,20 +92,20 @@ function cards(){
 function openShipment(id){if(state.current!==id){state.cart={};state.requestKey=null;state.productGroup='';}state.current=id;state.view='shipments';render();window.scrollTo(0,0);}
 function renderDetail(){
   const s=activeShipment();if(!s){state.current=null;render();return;}
-  const groups=groupProducts(s.products);
+  const groups=groupProducts(s.products,s.groupingMode==='manual'?s.groups:[]),hasGroups=groups.some(g=>g.name);
   state.productGroup=groups.find(g=>groupKey(g.name)===groupKey(state.productGroup))?.name||'';
-  app.innerHTML=`<button class="back" id="back">← Все поступления</button><section class="detail-head">${badge(s.status)}<h1>${esc(s.title)}</h1>${s.description?`<p class="subtitle">${esc(s.description).replaceAll('\n','<br>')}</p>`:''}<div class="detail-meta"><span>Дата поступления<strong>${date(s.eta)}</strong></span><span>Позиций<strong>${s.products.length}</strong></span></div></section><div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"><select id="product-group" aria-label="Тип товара"><option value="">Все типы товаров</option>${groups.map(g=>`<option value="${esc(g.name)}">${esc(g.name)} (${g.products.length})</option>`).join('')}</select></div><div class="product-groups" id="products"></div>`;
-  $('#product-group').value=state.productGroup;
-  $('#product-group').onchange=e=>{state.productGroup=e.target.value;products($('#product-search').value);};
-  $('#back').onclick=goBack;$('#product-search').oninput=debounce(e=>{if(e.target.isConnected)products(e.target.value);});products('');loadImages(s);
+  app.innerHTML=`<button class="back" id="back">← Все поступления</button><section class="detail-head">${badge(s.status)}<h1>${esc(s.title)}</h1>${s.description?`<p class="subtitle">${esc(s.description).replaceAll('\n','<br>')}</p>`:''}<div class="detail-meta"><span>Дата поступления<strong>${date(s.eta)}</strong></span><span>Позиций<strong>${s.products.length}</strong></span></div></section>${hasGroups?`<div class="toolbar"><input class="search" type="search" id="product-search" placeholder="Название, модель или артикул" aria-label="Поиск товара"><select id="product-group" aria-label="Группа товаров"><option value="">Все товары</option>${groups.filter(g=>g.name).map(g=>`<option value="${esc(g.name)}">${esc(g.name)} (${g.products.length})</option>`).join('')}</select></div>`:''}<div class="product-groups" id="products"></div>`;
+  if(hasGroups){$('#product-group').value=state.productGroup;$('#product-group').onchange=e=>{state.productGroup=e.target.value;products($('#product-search').value);};$('#product-search').oninput=debounce(e=>{if(e.target.isConnected)products(e.target.value);});}
+  $('#back').onclick=goBack;products('');loadImages(s);
 }
 function products(query){
-  const s=activeShipment(),list=proposeGroups(s.products).filter(p=>`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase()));
-  const groups=groupProducts(list).filter(g=>!state.productGroup||groupKey(g.name)===groupKey(state.productGroup));
-  $('#products').innerHTML=groups.length?groups.map((group,index)=>`<section class="product-group" aria-labelledby="product-group-${index}"><div class="group-heading"><h2 id="product-group-${index}">${esc(group.name)}</h2><span class="muted">Позиций: ${group.products.length}</span></div>${group.subgroups.map(subgroup=>`<div class="product-subgroup">${subgroup.name||group.subgroups.length>1?`<h3>${esc(subgroup.name||'Без подгруппы')}</h3>`:''}<div class="products">${subgroup.products.map(p=>{
+  const s=activeShipment(),list=s.products.filter(p=>`${p.name} ${p.sku}`.toLowerCase().includes(query.toLowerCase()));
+  const definitions=s.groupingMode==='manual'?s.groups:[],hasGroups=groupProducts(s.products,definitions).some(g=>g.name);
+  const groups=groupProducts(list,definitions).filter(g=>!state.productGroup||groupKey(g.name)===groupKey(state.productGroup));
+  $('#products').innerHTML=groups.length?groups.map((group,index)=>`<section class="product-group" ${hasGroups?`aria-labelledby="product-group-${index}"`:''}>${hasGroups?`<div class="group-heading"><h2 id="product-group-${index}">${esc(group.name||'Без группы')}</h2><span class="muted">Позиций: ${group.products.length}</span></div>`:''}<div class="products">${group.products.map(p=>{
     const qty=state.cart[p.id]||0,disabled=(!isOpen(s)&&!state.preview)||p.stock<=0;
     return `<article class="product ${qty?'selected':''}" data-product="${esc(p.id)}">${photo(p)}<div><span class="sku">АРТ. ${esc(p.sku)}</span><p class="product-title">${esc(p.name)}</p><span class="price">${money(p.price)}</span><div class="stock">${p.stock>0?`В наличии ${p.stock} шт.`:'Нет в наличии'}</div></div><div class="product-bottom"><span class="muted" style="font-size:13px">Количество</span><div class="stepper"><button data-step="-1" data-id="${esc(p.id)}" aria-label="Уменьшить количество" ${disabled?'disabled':''}>−</button><input data-qty="${esc(p.id)}" type="number" inputmode="numeric" min="0" max="${p.stock}" value="${qty}" aria-label="Количество ${esc(p.sku)}" ${disabled?'disabled':''}><button data-step="1" data-id="${esc(p.id)}" aria-label="Увеличить количество" ${disabled?'disabled':''}>+</button></div></div></article>`;
-  }).join('')}</div></div>`).join('')}</section>`).join(''):'<p class="empty">Ничего не найдено.</p>';
+  }).join('')}</div></section>`).join(''):'<p class="empty">Ничего не найдено.</p>';
   document.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>setQuantity(b.dataset.id,(state.cart[b.dataset.id]||0)+Number(b.dataset.step)));
   document.querySelectorAll('[data-qty]').forEach(input=>input.onchange=()=>setQuantity(input.dataset.qty,Number(input.value)));
   hydrateImages();
@@ -258,22 +258,22 @@ function showBotSetup(){
 }
 function editShipment(existing){
   importController?.abort();
-  let products=existing?proposeGroups(existing.products.map(p=>({...p,total:p.total??p.stock}))):null,warnings=[];
-  let groupingReviewNeeded=Boolean(existing?.products.some(p=>!p.group)),previousProducts=products||[];
-  showDialog(existing?'Настройки поступления':'Новое поступление',`<form id="shipment-form"><label class="field">Название<input name="title" required maxlength="160" value="${esc(existing?.title||'')}" placeholder="Например, Gurdini Slim Series"></label><div class="form-grid"><label class="field">Бренд<input name="brand" maxlength="80" value="${esc(existing?.brand||'')}"></label><label class="field">Статус<select name="status">${Object.entries(statuses).filter(([k])=>['draft','arrived','closed'].includes(k)).map(([k,v])=>`<option value="${k}" ${(existing?.status || 'arrived')===k?'selected':''}>${v}</option>`).join('')}</select></label><label class="field">Дата поступления<input type="date" name="eta" value="${esc(existing?.eta||'')}"></label><label class="field">Дата публикации<input type="date" name="publishedAt" value="${esc(existing?.publishedAt||'')}"></label></div><label class="field">Описание<textarea name="description" maxlength="3000">${esc(existing?.description||'')}</textarea></label><label class="field">${existing?'Обновить товары из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx"></label><p class="fine-print">Кол-во в Excel — исходное количество товара до вычета заказов. При обновлении действующие заказы сохраняются.</p><div id="import-info">${products?`<p class="import-summary">${products.length} позиций</p>`:''}</div><div id="group-editor"></div><label class="field group-confirm" id="group-confirm" hidden><input type="checkbox" id="accept-groups"> Группы и подгруппы проверены</label><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить поступление</button></form>`);
+  const groups=existing?.groupingMode==='manual'?[...(existing.groups||[])]:[];
+  let products=existing?manualProducts(existing.products.map(p=>({...p,total:p.total??p.stock})),groups):null,warnings=[],previousProducts=products||[];
+  showDialog(existing?'Настройки поступления':'Новое поступление',`<form id="shipment-form"><label class="field">Название<input name="title" required maxlength="160" value="${esc(existing?.title||'')}" placeholder="Например, Gurdini Slim Series"></label><div class="form-grid"><label class="field">Бренд<input name="brand" maxlength="80" value="${esc(existing?.brand||'')}"></label><label class="field">Статус<select name="status">${Object.entries(statuses).filter(([k])=>['draft','arrived','closed'].includes(k)).map(([k,v])=>`<option value="${k}" ${(existing?.status || 'arrived')===k?'selected':''}>${v}</option>`).join('')}</select></label><label class="field">Дата поступления<input type="date" name="eta" value="${esc(existing?.eta||'')}"></label><label class="field">Дата публикации<input type="date" name="publishedAt" value="${esc(existing?.publishedAt||'')}"></label></div><label class="field">Описание<textarea name="description" maxlength="3000">${esc(existing?.description||'')}</textarea></label><label class="field">${existing?'Обновить товары из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx"></label><p class="fine-print">Кол-во в Excel — исходное количество товара до вычета заказов. При обновлении действующие заказы сохраняются.</p><div id="import-info">${products?`<p class="import-summary">${products.length} позиций</p>`:''}</div><div id="group-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить поступление</button></form>`);
   const form=$('#shipment-form');
-  function reviewGroups(){mountGroupEditor($('#group-editor'),products);$('#group-confirm').hidden=!groupingReviewNeeded;$('#accept-groups').checked=!groupingReviewNeeded;}
+  function reviewGroups(){mountGroupEditor($('#group-editor'),products,groups);}
   if(products)reviewGroups();
   $('#xlsx-file').onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
     importController?.abort();const controller=new AbortController();importController=controller;
     if(products)previousProducts=products;
-    products=null;warnings=[];$('#group-editor').textContent='';$('#group-confirm').hidden=true;
+    products=null;warnings=[];$('#group-editor').textContent='';
     $('#save-shipment').disabled=true;$('#import-info').textContent='Читаем Excel и сжимаем фотографии…';$('#import-error').textContent='';
     try{
       const result=await readSupplierExcel(file,{signal:controller.signal});
       if(controller.signal.aborted||!form.isConnected)return;
-      products=proposeGroups(result.products,previousProducts);warnings=result.warnings;groupingReviewNeeded=true;reviewGroups();
+      products=manualProducts(result.products,groups,previousProducts);warnings=result.warnings;reviewGroups();
       if(!form.elements.title.value)form.elements.title.value=file.name.replace(/\.xlsx?$/i,'');
       $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image).length} фотографий</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Кол-во</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
       form.querySelectorAll('[data-import-price]').forEach(input=>input.oninput=()=>{const product=products.find(p=>p.id===input.dataset.importPrice);product.price=input.value.trim()&&input.validity.valid?Math.round(Number(input.value)*100):null;});
@@ -282,12 +282,10 @@ function editShipment(existing){
   };
   form.onsubmit=async e=>{
     e.preventDefault();if(!products)return;
-    if(products.some(p=>!p.group?.trim())){$('#import-error').textContent='Укажите группу для каждого товара.';return;}
-    if(groupingReviewNeeded&&!$('#accept-groups').checked){$('#import-error').textContent='Проверьте группы и отметьте «Группы и подгруппы проверены».';return;}
     if(products.some(p=>p.price===null)){$('#import-error').textContent='Заполните цены всех товаров перед сохранением.';return;}
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
-    try{await api('/admin/shipments','POST',{id:existing?.id||crypto.randomUUID(),...Object.fromEntries(new FormData(form)),products});closeDialog();await refresh();toast('Поступление сохранено.');}catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
+    try{await api('/admin/shipments','POST',{id:existing?.id||crypto.randomUUID(),...Object.fromEntries(new FormData(form)),groupingMode:'manual',groups,products});closeDialog();await refresh();toast('Поступление сохранено.');}catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
   };
 }
 function goBack(){if(Object.keys(state.cart).length){showDialog('Вернуться к поступлениям?',`<p>Выбранные количества будут сброшены.</p><button class="primary full" id="leave">Вернуться</button>`);$('#leave').onclick=()=>{closeDialog();state.cart={};state.current=null;state.requestKey=null;render();};}else{state.current=null;render();}}
@@ -310,8 +308,8 @@ async function refresh({background=false}={}){
         if(!activeShipment()){state.current=null;state.cart={};state.requestKey=null;render();return;}
         if(!changed)return;
         const selection=focused?.matches('[data-qty]')?focused.dataset.qty:null;
-        renderDetail();$('#product-search').value=query;products(query);cartBar();
-        if(focused===input)$('#product-search').focus({preventScroll:true});
+        renderDetail();if($('#product-search')){$('#product-search').value=query;products(query);}cartBar();
+        if(focused===input)$('#product-search')?.focus({preventScroll:true});
         else if(selection)app.querySelector(`[data-qty="${CSS.escape(selection)}"]`)?.focus({preventScroll:true});
         return;
       }

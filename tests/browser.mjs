@@ -91,13 +91,13 @@ try{
   const values=[['Наименование','Артикул','Кол-во','Опт.'],['Тестовый товар','test-1','5','150']];
   z.file('xl/worksheets/sheet1.xml',`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${values.map((r,i)=>`<row r="${i+1}">${r.map((v,j)=>`<c r="${String.fromCharCode(65+j)}${i+1}" t="inlineStr"><is><t>${v}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`);
   await page.locator('#xlsx-file').setInputFiles({name:'Test.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await z.generateAsync({type:'nodebuffer'})});
-  await page.waitForSelector('#accept-warnings');await page.locator('#accept-warnings').check();await page.locator('#accept-groups').check();await page.locator('#save-shipment').click();
+  await page.waitForSelector('#accept-warnings');await page.locator('#accept-warnings').check();await page.locator('#save-shipment').click();
   await page.waitForSelector('.admin-row:nth-child(2)');assert.equal(store.inventory.catalog(true).length,2);
   // Binary XLS goes through the worker. Empty prices must be filled before Save.
   await page.locator('#new-shipment').click();
   await page.locator('#xlsx-file').setInputFiles({name:'Legacy.xls',mimeType:'application/vnd.ms-excel',buffer:legacyFixture()});
   await page.waitForSelector('[data-import-price="xls-1"]');
-  await page.locator('#accept-warnings').check();await page.locator('#accept-groups').check();await page.locator('#save-shipment').click();
+  await page.locator('#accept-warnings').check();await page.locator('#save-shipment').click();
   assert.equal(store.inventory.catalog(true).length,2);
   await page.locator('[data-import-price="xls-1"]').fill('199.90');await page.locator('#save-shipment').click();
   await page.waitForSelector('.admin-row:nth-child(3)');
@@ -114,82 +114,56 @@ try{
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   await page.screenshot({path:'test-results/desktop.png',fullPage:true});
   await page.locator('#back').click();await page.waitForSelector('.shipment-card');
-  // Existing arrivals are grouped on display, with a shared cart across type filters.
-  store.inventory.importShipment({id:'grouped',title:'Смешанный файл',brand:'WIWU',status:'arrived',products:[
-    {id:'g1',sku:'g1',name:'Чехол конверт Air',stock:5,price:10000},
-    {id:'g2',sku:'g2',name:'Защитный чехол Pro',stock:3,price:20000},
-    {id:'g3',sku:'g3',name:'Защитная пленка iPad',stock:8,price:30000},
-    {id:'g4',sku:'g4',name:'Чехол конверт Pro',stock:4,price:40000}
-  ]});
-  await page.locator('#refresh').click();await page.waitForSelector('[data-shipment="grouped"]');
-  await page.locator('[data-shipment="grouped"]').click();
-  assert.deepEqual(await page.locator('.group-heading h2').allTextContents(),['Чехол конверт','Защитный чехол','Защитная плёнка']);
-  assert.deepEqual(await page.locator('[data-product]').evaluateAll(nodes=>nodes.map(n=>n.dataset.product)),['g1','g4','g2','g3']);
-  await page.locator('[data-step="1"][data-id="g1"]').click();
-  await page.locator('#product-group').selectOption('Защитная плёнка');
-  assert.equal(await page.locator('[data-product]').count(),1);
-  await page.locator('[data-step="1"][data-id="g3"]').click();
-  await page.locator('#product-search').fill('no-match');await page.waitForSelector('#products .empty');
-  await page.locator('#product-search').fill('');await page.waitForSelector('[data-product="g3"]');
-  await page.locator('#product-group').selectOption('');
-  assert.equal(await page.locator('[data-qty="g1"]').inputValue(),'1');
-  assert.equal(await page.locator('[data-qty="g3"]').inputValue(),'1');
-  await page.setViewportSize({width:390,height:844});
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await page.screenshot({path:'test-results/grouped-products.png',fullPage:true});
-  await page.locator('#open-cart').click();
-  await page.waitForSelector('.cart-line');
-  assert.equal(await page.locator('.cart-line').count(),2);
-  assert.match(await page.locator('.cart-total').textContent(),/2 шт/);
-  await page.locator('#close-dialog').click();
-  // Full proposal -> review -> save -> reload -> reimport cycle.
-  await page.reload();await page.waitForSelector('.shipment-card');
+  // Import without grouping, then manually assign, reimport and remove groups.
   await page.locator('#admin-tab').click();await page.locator('#new-shipment').click();
   const mixedRows=[['Наименование','Код','Доступно','Цена продажи'],
-    ['Защитное стекло iPhone 15 матовое','a1','5','150'],
-    ['Защитное стекло iPhone 16 антишпион','a2','6','200'],
-    ['Защитное стекло iPhone 15 керамическое','a3','7','250'],
-    ['Защитное стекло iPhone 16 глянцевое','a4','8','300'],
-    ['Провод USB-C 1м','a5','9','350'],
-    ['Аккумулятор WiWU 10000mAh','a6','10','400'],
-    ['Зубная щетка дорожная Sonic','a7','11','450']];
-  z.file('xl/worksheets/sheet1.xml',`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${mixedRows.map((r,i)=>`<row r="${i+1}">${r.map((v,j)=>`<c r="${String.fromCharCode(65+j)}${i+1}" t="inlineStr"><is><t>${v}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`);
-  const mixedFile={name:'Analysis.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await z.generateAsync({type:'nodebuffer'})};
-  await page.locator('#xlsx-file').setInputFiles(mixedFile);
-  await page.waitForSelector('[data-product-group="a1"]');
-  assert.equal(await page.locator('[data-product-group="a1"]').inputValue(),'Защитное стекло');
-  assert.equal(await page.locator('[data-product-subgroup="a2"]').inputValue(),'Антишпион');
-  assert.equal(await page.locator('[data-product-group="a5"]').inputValue(),'Кабель');
-  const countBeforeReview=store.inventory.catalog(true).length;
+    ['Защитное стекло матовое','z9','5','150'],
+    ['Провод USB-C','a2','6','200'],
+    ['Аккумулятор WiWU','m1','7','250']];
+  const mixedFile=async rows=>{
+    z.file('xl/worksheets/sheet1.xml',`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows.map((r,i)=>`<row r="${i+1}">${r.map((v,j)=>`<c r="${String.fromCharCode(65+j)}${i+1}" t="inlineStr"><is><t>${v}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`);
+    return {name:'Manual.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await z.generateAsync({type:'nodebuffer'})};
+  };
+  await page.locator('#xlsx-file').setInputFiles(await mixedFile(mixedRows));
+  await page.waitForSelector('#add-product-group');
+  assert.equal(await page.locator('[data-product-group]').count(),0);
+  assert.equal(await page.locator('#accept-groups').count(),0);
   await page.locator('#accept-warnings').check();await page.locator('#save-shipment').click();
-  assert.match(await page.locator('#import-error').textContent(),/Группы и подгруппы проверены/);
-  assert.equal(store.inventory.catalog(true).length,countBeforeReview);
-  await page.locator('[data-group-renames]').locator('..').locator('summary').click();
-  await page.locator('[data-rename-input="0"]').fill('Стёкла для телефонов');
-  await page.locator('[data-rename-group="0"]').click();
-  assert.equal(await page.locator('[data-product-group="a4"]').inputValue(),'Стёкла для телефонов');
-  await page.locator('[data-product-group="a5"]').fill('Кабели и переходники');
-  await page.locator('[data-product-subgroup="a5"]').fill('USB-C');
-  await page.locator('[data-product-group="a7"]').fill('Уход');
-  await page.locator('#accept-groups').check();
+  await page.waitForSelector('#shipment-form',{state:'hidden'});
+  const manual=store.inventory.catalog(true).find(s=>s.title==='Manual');
+  await page.reload();await page.waitForSelector(`[data-shipment="${manual.id}"]`);await page.locator(`[data-shipment="${manual.id}"]`).click();
+  const ids=()=>page.locator('[data-product]').evaluateAll(nodes=>nodes.map(n=>n.dataset.product));
+  assert.deepEqual(await ids(),['z9','a2','m1']);
+  assert.equal(await page.locator('#product-group,.group-heading,#product-search').count(),0);
+  await page.locator('#admin-tab').click();await page.locator(`[data-edit="${manual.id}"]`).click();
+  await page.locator('#new-product-group').fill('Аксессуары');await page.locator('#add-product-group').click();
+  await page.locator('[data-product-group="z9"]').selectOption('Аксессуары');
+  await page.locator('[data-product-group="m1"]').selectOption('Аксессуары');
+  await page.locator('[data-rename-input="0"]').fill('Моя группа');await page.locator('[data-rename-group="0"]').click();
+  assert.equal(await page.locator('[data-product-group="m1"]').inputValue(),'Моя группа');
+  await page.setViewportSize({width:390,height:844});
   assert.equal(await page.evaluate(()=>document.querySelector('#dialog').scrollWidth>document.querySelector('#dialog').clientWidth),false);
-  await page.screenshot({path:'test-results/group-review.png',fullPage:true});
+  await page.screenshot({path:'test-results/manual-groups.png',fullPage:true});
   await page.locator('#save-shipment').click();await page.waitForSelector('#shipment-form',{state:'hidden'});
-  const analyzed=store.inventory.catalog(true).find(s=>s.title==='Analysis');
-  assert.equal(analyzed.products.find(p=>p.id==='a5').subgroup,'USB-C');
-  assert.equal(analyzed.products.find(p=>p.id==='a7').group,'Уход');
-  await page.reload();await page.waitForSelector(`[data-shipment="${analyzed.id}"]`);
-  await page.locator(`[data-shipment="${analyzed.id}"]`).click();
-  assert((await page.locator('.group-heading h2').allTextContents()).includes('Стёкла для телефонов'));
-  assert.deepEqual((await page.locator('.product-subgroup h3').allTextContents()).slice(0,4),['Матовое','Антишпион','Керамическое','Глянцевое']);
-  await page.locator('#product-search').fill('a2');await page.waitForSelector('[data-product="a1"]',{state:'detached'});
-  assert.equal(await page.locator('.product-subgroup h3').textContent(),'Антишпион');
-  await page.locator('#admin-tab').click();await page.locator(`[data-edit="${analyzed.id}"]`).click();
-  await page.locator('#xlsx-file').setInputFiles(mixedFile);await page.waitForSelector('[data-product-group="a5"]');
-  assert.equal(await page.locator('[data-product-group="a5"]').inputValue(),'Кабели и переходники');
-  assert.equal(await page.locator('[data-product-subgroup="a5"]').inputValue(),'USB-C');
-  await page.locator('#accept-warnings').check();await page.locator('#accept-groups').check();
+  await page.reload();await page.waitForSelector(`[data-shipment="${manual.id}"]`);await page.locator(`[data-shipment="${manual.id}"]`).click();
+  assert.deepEqual(await page.locator('.group-heading h2').allTextContents(),['Моя группа','Без группы']);
+  assert.deepEqual(await ids(),['z9','m1','a2']);
+  await page.locator('[data-step="1"][data-id="a2"]').click();
+  await page.locator('#product-group').selectOption('Моя группа');assert.deepEqual(await ids(),['z9','m1']);
+  await page.locator('[data-step="1"][data-id="z9"]').click();
+  await page.locator('#product-search').fill('not-found');await page.waitForSelector('#products .empty');
+  await page.locator('#product-search').fill('');await page.waitForSelector('[data-product="z9"]');
+  await page.locator('#product-group').selectOption('');assert.equal(await page.locator('[data-qty="a2"]').inputValue(),'1');
+  await page.locator('#open-cart').click();await page.waitForSelector('.cart-line');assert.equal(await page.locator('.cart-line').count(),2);await page.locator('#close-dialog').click();
+  await page.locator('#admin-tab').click();await page.locator(`[data-edit="${manual.id}"]`).click();
+  await page.locator('#xlsx-file').setInputFiles(await mixedFile([mixedRows[0],mixedRows[3],mixedRows[2],mixedRows[1]]));
+  await page.waitForSelector('#accept-warnings');
+  assert.equal(await page.locator('[data-product-group="m1"]').inputValue(),'Моя группа');
+  await page.locator('#accept-warnings').check();await page.locator('#save-shipment').click();await page.waitForSelector('#shipment-form',{state:'hidden'});
+  assert.deepEqual(store.inventory.catalog(true).find(s=>s.id===manual.id).products.map(p=>p.id),['m1','a2','z9']);
+  await page.locator(`[data-edit="${manual.id}"]`).click();await page.locator('#clear-product-groups').click();
   await page.locator('#save-shipment').click();await page.waitForSelector('#shipment-form',{state:'hidden'});
-  assert.equal(store.inventory.catalog(true).find(s=>s.id===analyzed.id).products.find(p=>p.id==='a1').stock,5);
-  assert.deepEqual(errors,[]);console.log('Browser checks passed: mobile, order, cancellation, Excel import/export, desktop.');
+  await page.reload();await page.waitForSelector(`[data-shipment="${manual.id}"]`);await page.locator(`[data-shipment="${manual.id}"]`).click();
+  assert.deepEqual(await ids(),['m1','a2','z9']);assert.equal(await page.locator('#product-group,.group-heading,#product-search').count(),0);
+  assert.deepEqual(errors,[]);console.log('Browser checks passed: orders, imports, manual groups, file order and no-group defaults.');
 }finally{await browser?.close();await new Promise(r=>server.close(r));}
