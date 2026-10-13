@@ -64,6 +64,19 @@ test('invalid quantities, repeated items, negative stock and unsafe image URLs a
   assert.throws(()=>inv.importShipment({...shipment,products:[{...shipment.products[0],stock:-1}]}));
   assert.throws(()=>inv.importShipment({...shipment,products:[{...shipment.products[0],image:'javascript:alert(1)'}]}));
 });
+test('shipment cover saves, replaces, removes and rejects unsupported image data',()=>{
+  const {inv,shipment}=fixture();
+  const cover='data:image/webp;base64,AAAA';
+  inv.importShipment({...shipment,cover});
+  assert.equal(inv.catalog()[0].cover,cover);
+  inv.importShipment({...shipment});
+  assert.equal(inv.catalog()[0].cover,cover);
+  inv.importShipment({...shipment,cover:null});
+  assert.equal(inv.catalog()[0].cover,null);
+  for(const invalid of ['javascript:alert(1)','data:image/svg+xml;base64,AAA','data:image/gif;base64,AAAA',42]){
+    assert.throws(()=>inv.importShipment({...shipment,cover:invalid}),/обложки/);
+  }
+});
 function signedData(token,overrides={}){
   const params=new URLSearchParams({auth_date:String(Math.floor(Date.now()/1000)),user:JSON.stringify({id:123,first_name:'Иван'}),...overrides});
   const text=[...params.entries()].sort(([a],[b])=>a<b?-1:1).map(([k,v])=>`${k}=${v}`).join('\n');
