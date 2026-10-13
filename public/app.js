@@ -17,11 +17,16 @@ const debounce=(fn,delay=120)=>{let timer;return (...args)=>{clearTimeout(timer)
 function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').hidden=true,6500);}
 function badge(status){return `<span class="badge ${esc(status)}">${esc(statuses[status]||status)}</span>`;}
 function notice(text){$('#notice').textContent=text;$('#notice').hidden=!text;}
-async function api(path,method='GET',body){
-  const response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(25000)});
-  const data=await response.json();
-  if(!response.ok){const error=Error(data.error||'Не удалось выполнить запрос.');error.status=response.status;throw error;}
-  return data;
+async function api(path,method='GET',body,{timeout=25000}={}){
+  try{
+    const response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg?.initData||''},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(timeout)});
+    const data=await response.json();
+    if(!response.ok){const error=Error(data.error||'Не удалось выполнить запрос.');error.status=response.status;throw error;}
+    return data;
+  }catch(error){
+    if(error?.name==='TimeoutError'||error?.name==='AbortError'||/aborted/i.test(error?.message||''))throw Error('Отправка заняла слишком много времени. Проверьте интернет и нажмите «Сохранить поступление» ещё раз.');
+    throw error;
+  }
 }
 async function init(){
   try{
@@ -318,7 +323,7 @@ function editShipment(existing){
     if(products.some(p=>p.price===null)){$('#import-error').textContent='Заполните цены всех товаров перед сохранением.';return;}
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
-    try{await api('/admin/shipments','POST',{id:existing?.id||crypto.randomUUID(),...Object.fromEntries(new FormData(form)),groupingMode:'manual',groups,cover,products});closeDialog();await refresh();toast('Поступление сохранено.');}catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
+    try{await api('/admin/shipments','POST',{id:existing?.id||crypto.randomUUID(),...Object.fromEntries(new FormData(form)),groupingMode:'manual',groups,cover,products},{timeout:180000});closeDialog();await refresh();toast('Поступление сохранено.');}catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
   };
 }
 function goBack(){if(Object.keys(state.cart).length){showDialog('Вернуться к поступлениям?',`<p>Выбранные количества будут сброшены.</p><button class="primary full" id="leave">Вернуться</button>`);$('#leave').onclick=()=>{closeDialog();state.cart={};state.current=null;state.requestKey=null;render();};}else{state.current=null;render();}}
