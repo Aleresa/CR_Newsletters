@@ -260,21 +260,40 @@ function showBotSetup(){
 function editShipment(existing){
   importController?.abort();
   const groups=existing?.groupingMode==='manual'?[...(existing.groups||[])]:[];
-  let cover=existing?.cover||null;
+  let cover=existing?.cover||null,coverRequest=0,coverBusy=false;
   let products=existing?manualProducts(existing.products.map(p=>({...p,total:p.total??p.stock})),groups):null,warnings=[],previousProducts=products||[];
   showDialog(existing?'Настройки поступления':'Новое поступление',`<form id="shipment-form"><label class="field">Название<input name="title" required maxlength="160" value="${esc(existing?.title||'')}" placeholder="Например, Gurdini Slim Series"></label><div class="form-grid"><label class="field">Бренд<input name="brand" maxlength="80" value="${esc(existing?.brand||'')}"></label><label class="field">Статус<select name="status">${Object.entries(statuses).filter(([k])=>['draft','arrived','closed'].includes(k)).map(([k,v])=>`<option value="${k}" ${(existing?.status || 'arrived')===k?'selected':''}>${v}</option>`).join('')}</select></label><label class="field">Дата поступления<input type="date" name="eta" value="${esc(existing?.eta||'')}"></label><label class="field">Дата публикации<input type="date" name="publishedAt" value="${esc(existing?.publishedAt||'')}"></label></div><label class="field">Описание<textarea name="description" maxlength="3000">${esc(existing?.description||'')}</textarea></label><div class="cover-editor"><label class="field">Обложка поступления (JPG, PNG, WebP)<input type="file" id="cover-file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"></label><div id="cover-preview"></div><button type="button" class="secondary" id="remove-cover" hidden>Удалить обложку</button><p id="cover-error" class="error" role="alert"></p></div><label class="field">${existing?'Обновить товары из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx"></label><p class="fine-print">Кол-во в Excel — исходное количество товара до вычета заказов. При обновлении действующие заказы сохраняются.</p><div id="import-info">${products?`<p class="import-summary">${products.length} позиций</p>`:''}</div><div id="group-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить поступление</button></form>`);
   const form=$('#shipment-form');
+  function updateSaveState(){
+    const button=$('#save-shipment');
+    if(!button)return;
+    button.disabled=!products||coverBusy;
+    button.textContent=coverBusy?'Подготавливаем обложку…':'Сохранить поступление';
+  }
   function renderCover(){
     $('#cover-preview').innerHTML=cover?`<img src="${esc(cover)}" alt="Предпросмотр обложки" class="cover-preview-image">`:'<span class="fine-print">Без обложки будут показаны фотографии товаров.</span>';
     $('#remove-cover').hidden=!cover;
   }
   renderCover();
-  $('#remove-cover').onclick=()=>{cover=null;$('#cover-file').value='';$('#cover-error').textContent='';renderCover();};
+  $('#remove-cover').onclick=()=>{
+    coverRequest++;coverBusy=false;cover=null;
+    $('#cover-file').value='';$('#cover-error').textContent='';
+    renderCover();updateSaveState();
+  };
   $('#cover-file').onchange=async e=>{
     const file=e.target.files[0];if(!file)return;
-    $('#cover-error').textContent='';
-    try{cover=await compressCover(file);renderCover();}
-    catch(error){$('#cover-error').textContent=error.message;e.target.value='';}
+    const request=++coverRequest;
+    coverBusy=true;updateSaveState();$('#cover-error').textContent='';
+    try{
+      const nextCover=await compressCover(file);
+      if(request!==coverRequest||!form.isConnected)return;
+      cover=nextCover;renderCover();
+    }catch(error){
+      if(request!==coverRequest||!form.isConnected)return;
+      $('#cover-error').textContent=error.message;e.target.value='';
+    }finally{
+      if(request===coverRequest&&form.isConnected){coverBusy=false;updateSaveState();}
+    }
   };
   function reviewGroups(){mountGroupEditor($('#group-editor'),products,groups);}
   if(products)reviewGroups();
@@ -291,11 +310,11 @@ function editShipment(existing){
       if(!form.elements.title.value)form.elements.title.value=file.name.replace(/\.xlsx?$/i,'');
       $('#import-info').innerHTML=`<div class="import-summary">${products.length} позиций · ${products.filter(p=>p.image).length} фотографий</div>${warnings.length?`<details class="warning"><summary>Замечания: ${warnings.length}</summary>${warnings.map(w=>`<div>${esc(w)}</div>`).join('')}</details><label class="field"><input id="accept-warnings" type="checkbox" style="width:auto;min-height:auto"> Проверил замечания</label>`:''}<div class="import-preview"><table><thead><tr><th>Товар</th><th>Кол-во</th><th>Цена</th></tr></thead><tbody>${products.map(p=>`<tr><td>${esc(p.name)}<br>${esc(p.sku)}</td><td>${p.stock}</td><td>${p.price===null?`<input data-import-price="${esc(p.id)}" type="number" inputmode="decimal" required min="0" max="1000000" step="0.01" placeholder="Цена, ₽" aria-label="Цена ${esc(p.sku)}">`:money(p.price)}</td></tr>`).join('')}</tbody></table></div>`;
       form.querySelectorAll('[data-import-price]').forEach(input=>input.oninput=()=>{const product=products.find(p=>p.id===input.dataset.importPrice);product.price=input.value.trim()&&input.validity.valid?Math.round(Number(input.value)*100):null;});
-      $('#save-shipment').disabled=false;
+      updateSaveState();
     }catch(e){if(controller.signal.aborted||!form.isConnected)return;products=null;$('#import-info').textContent='';$('#import-error').textContent=e.message;}
   };
   form.onsubmit=async e=>{
-    e.preventDefault();if(!products)return;
+    e.preventDefault();if(!products||coverBusy)return;
     if(products.some(p=>p.price===null)){$('#import-error').textContent='Заполните цены всех товаров перед сохранением.';return;}
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
