@@ -19,14 +19,24 @@ async function relations(zip,path) {
   if(!entry)return {};
   return Object.fromEntries(nodes(xml(await entry.async('text')),'Relationship').filter(r=>r.getAttribute('TargetMode')!=='External').map(r=>[r.getAttribute('Id'),resolve(path,r.getAttribute('Target'))]));
 }
-async function compress(bytes) {
+const MAX_PRODUCT_IMAGE_LENGTH=175000;
+export async function compressProductImage(bytes) {
   const blob=new Blob([bytes]),url=URL.createObjectURL(blob);
   try {
     const image=new Image();image.src=url;await image.decode();
-    const ratio=Math.min(1,320/image.width,320/image.height);
-    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.width*ratio));canvas.height=Math.max(1,Math.round(image.height*ratio));
-    const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
-    return canvas.toDataURL('image/webp',.7);
+    if(!image.naturalWidth || !image.naturalHeight)throw Error('Пустое изображение.');
+    let ratio=Math.min(1,320/image.naturalWidth,320/image.naturalHeight),quality=.72;
+    const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+    if(!ctx)throw Error('Не удалось подготовить изображение.');
+    for(;;) {
+      canvas.width=Math.max(1,Math.round(image.naturalWidth*ratio));
+      canvas.height=Math.max(1,Math.round(image.naturalHeight*ratio));
+      ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
+      const data=canvas.toDataURL('image/webp',quality);
+      if(data.length<=MAX_PRODUCT_IMAGE_LENGTH)return data;
+      if(Math.max(canvas.width,canvas.height)<=96)throw Error('Фотография слишком сложная для сохранения.');
+      ratio*=.8;quality=Math.max(.5,quality-.08);
+    }
   } finally {URL.revokeObjectURL(url);}
 }
 export async function readSupplierExcel(file,{signal}={}) {
@@ -40,7 +50,7 @@ export async function readSupplierExcel(file,{signal}={}) {
   for(const picture of result.pictures) {
     signal?.throwIfAborted();
     const product=result.products.find(p=>p.id===picture.id);
-    try{product.image=await compress(picture.bytes);}catch{result.warnings.push(`${product.sku}: не удалось прочитать фотографию.`);}
+    try{product.image=await compressProductImage(picture.bytes);}catch{result.warnings.push(`${product.sku}: не удалось прочитать фотографию.`);}
   }
   signal?.throwIfAborted();
   for(const product of result.products)if(!product.image)result.warnings.push(`${product.sku}: фотография отсутствует или её формат не поддерживается.`);
@@ -95,7 +105,7 @@ async function readXlsx(file,signal) {
       const row=Number(textOf(from,'row'))+1,p=rowProducts.get(row);if(!p)continue;
       const blip=nodes(anchor,'blip')[0],imagePath=blip && dr[blip.getAttribute('r:embed')];
       if(imagePath && zip.file(imagePath)) {
-        try { p.image=await compress(await zip.file(imagePath).async('uint8array')); }
+        try { p.image=await compressProductImage(await zip.file(imagePath).async('uint8array')); }
         catch { warnings.push(`${p.sku}: не удалось прочитать фотографию.`); }
       }
     }

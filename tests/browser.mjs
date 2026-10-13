@@ -45,6 +45,27 @@ try{
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('https://telegram.org/js/telegram-web-app.js',route=>route.fulfill({contentType:'text/javascript',body:`window.Telegram={WebApp:{initData:${JSON.stringify(initData)},ready(){},expand(){},BackButton:{show(){},hide(){},onClick(){}}}};`}));
   await page.goto('http://localhost:4174');await page.waitForSelector('.shipment-card');
+  // Product photos that remain above the server limit are resized again before Save.
+  const productImageCompression=await page.evaluate(async()=>{
+    const source=document.createElement('canvas');source.width=320;source.height=320;
+    const sourceCtx=source.getContext('2d');sourceCtx.fillStyle='#123456';sourceCtx.fillRect(0,0,320,320);
+    const blob=await new Promise(resolve=>source.toBlob(resolve,'image/png'));
+    const bytes=new Uint8Array(await blob.arrayBuffer());
+    const original=HTMLCanvasElement.prototype.toDataURL;let calls=0;
+    try{
+      HTMLCanvasElement.prototype.toDataURL=function(type,quality){
+        calls++;
+        if(calls===1)return 'data:image/webp;base64,'+'A'.repeat(180001);
+        return original.call(this,type,quality);
+      };
+      const {compressProductImage}=await import('/xlsx.js?compression-test=1');
+      const data=await compressProductImage(bytes);
+      return {calls,length:data.length,prefix:data.slice(0,24)};
+    }finally{HTMLCanvasElement.prototype.toDataURL=original;}
+  });
+  assert(productImageCompression.calls>=2);
+  assert(productImageCompression.length<=175000);
+  assert.match(productImageCompression.prefix,/^data:image\/(webp|png);base64,/);
   assert.equal(await page.locator('.shipment-card').count(),1);
   await page.locator('#shipment-search').fill('Demo');
   await page.locator('#refresh').click();await page.waitForFunction(()=>!document.querySelector('#refresh').disabled);
