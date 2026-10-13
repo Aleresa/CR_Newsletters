@@ -28,7 +28,7 @@ function embeddedPicture(body) {
 }
 export function xlsPictures(stream) {
   const bytes=new Uint8Array(stream),data=view(bytes),global=[],sheet=[];
-  let target=null,firstSheet=null,inFirst=false;
+  let target=null,firstSheet=null,inFirst=false,afterObject=false;
   for(let offset=0;offset+4<=bytes.length;) {
     const type=data.getUint16(offset,true),length=data.getUint16(offset+2,true),end=offset+4+length;
     if(end>bytes.length)throw Error('Повреждён файл XLS.');
@@ -36,8 +36,15 @@ export function xlsPictures(stream) {
     if(offset===firstSheet)inFirst=true;
     if(type===0xeb)target=global;
     else if(type===0xec && inFirst)target=sheet;
+    // Some Excel versions store later OfficeArt shapes in CONTINUE
+    // records immediately after OBJ instead of another MSODRAWING record.
+    // Keep these shapes, but never include unrelated BIFF CONTINUE data.
+    else if(type===0x3c && inFirst && afterObject && length>=8 &&
+      data.getUint16(offset+4,true)===0x000f &&
+      data.getUint16(offset+6,true)===0xf004)target=sheet;
     else if(type!==0x3c)target=null;
     if(target)target.push(bytes.subarray(offset+4,end));
+    afterObject=inFirst && type===0x5d;
     if(type===0x0a && inFirst)inFirst=false;
     offset=end;
   }
