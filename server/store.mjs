@@ -69,7 +69,9 @@ export class Inventory {
     const groups=input.groupingMode==='manual'?(input.groups??[]):[];
     if(!Array.isArray(groups)||groups.length>100||groups.some(g=>typeof g!=='string'||!g.trim()||g.length>80)||new Set(groups.map(groupKey)).size!==groups.length)throw new ApiError(400,'Укажите до 100 групп с уникальными названиями до 80 символов.');
     const groupNames=groups.map(g=>g.trim().replace(/\s+/g,' '));
-    const shipment = {id:input.id,title:trim(input.title,160),brand:trim(input.brand,80),description:trim(input.description,3000),status:input.status,groupingMode:'manual',groups:groupNames,eta:input.eta || null,
+    const cover=input.cover??previous?.cover??null;
+    if(cover!==null && (typeof cover!=='string' || !/^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(cover) || cover.length>180000))throw new ApiError(400,'Некорректный формат или размер обложки. Используйте JPG, PNG или WebP.');
+    const shipment = {id:input.id,cover,title:trim(input.title,160),brand:trim(input.brand,80),description:trim(input.description,3000),status:input.status,groupingMode:'manual',groups:groupNames,eta:input.eta || null,
       publishedAt:input.publishedAt || previous?.publishedAt || (input.status === 'draft'?null:new Date().toISOString().slice(0,10))};
     const ids = new Set();
     const products = input.products.map((p,position)=>{
