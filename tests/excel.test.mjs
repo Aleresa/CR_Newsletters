@@ -69,3 +69,26 @@ test('legacy drawings map pictures to anchors, support continuations and exclude
   const pictures=xlsPictures(bytes);assert.equal(pictures.length,1);assert.equal(pictures[0].row,8);assert.deepEqual(Buffer.from(pictures[0].bytes),jpeg);
   assert.throws(()=>xlsPictures(bytes.subarray(0,20)),/Повреждён/);
 });
+
+test('Excel OBJ records may be followed by drawing CONTINUE records',()=>{
+  const jpeg=Buffer.from([255,216,255,217]);
+  const blip=art(0xf01d,Buffer.concat([Buffer.alloc(16),Buffer.from([255]),jpeg]),0x46a0);
+  const global=art(0xf000,art(0xf001,art(0xf007,Buffer.concat([Buffer.alloc(36),blip]),2),15),15);
+  const property=Buffer.alloc(6);property.writeUInt16LE(0x4104);property.writeUInt32LE(1,2);
+  const shape=row=>{
+    const anchor=Buffer.alloc(18);anchor.writeUInt16LE(row-1,6);
+    return art(0xf004,Buffer.concat([art(0xf00b,property,0x13),art(0xf010,anchor)]),15);
+  };
+  const first=shape(10),second=shape(11),root=art(0xf002,Buffer.concat([first,second]),15);
+  const bounds=Buffer.alloc(4);
+  const head=[biff(0x85,bounds),biff(0xeb,global),biff(0x0a,Buffer.alloc(0))];
+  head[0].writeUInt32LE(head.reduce((n,r)=>n+r.length,0),4);
+  const workbook=Buffer.concat([...head,biff(0x809,Buffer.alloc(4)),
+    biff(0xec,root.subarray(0,8+first.length)),
+    biff(0x5d,Buffer.alloc(38)),
+    biff(0x3c,root.subarray(8+first.length)),
+    biff(0x0a,Buffer.alloc(0))]);
+  const pictures=xlsPictures(workbook);
+  assert.deepEqual(pictures.map(p=>p.row),[10,11]);
+  assert.deepEqual([...pictures[1].bytes],[...jpeg]);
+});

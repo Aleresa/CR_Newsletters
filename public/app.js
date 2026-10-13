@@ -1,6 +1,7 @@
 import {readSupplierExcel,exportOrders} from './xlsx.js';
 import {groupProducts,manualProducts,groupKey} from './product-groups.js';
 import {mountGroupEditor} from './group-editor.js';
+import {compressCover} from './cover-image.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
 const tg=window.Telegram?.WebApp;
@@ -84,7 +85,7 @@ function cards(){
   });
   $('#shipment-grid').innerHTML=list.length?list.map(s=>{
     const examples=s.products.filter(p=>p.image||p.imageKey).slice(0,2),min=s.products.length?Math.min(...s.products.map(p=>p.price)):0;
-    return `<article class="shipment-card"><button class="card-open" data-shipment="${esc(s.id)}"><div class="card-visual ${esc(s.brand.toLowerCase())}">${examples.map(p=>photo(p,'cover-photo')).join('')}<span class="brand-label">${esc(s.brand)}</span></div><div class="card-body"><div class="card-meta">${badge(s.status)}<span class="muted">${s.publishedAt?date(s.publishedAt):'Не опубликовано'}</span></div><h2>${esc(s.title)}</h2><span class="muted">${s.products.length} позиций · от ${money(min)}</span><div class="card-footer"><span>Дата: ${date(s.eta)}</span><span class="arrow" aria-hidden="true">↗</span></div></div></button></article>`;
+    return `<article class="shipment-card"><button class="card-open" data-shipment="${esc(s.id)}"><div class="card-visual ${esc(s.brand.toLowerCase())}">${s.cover?`<img class="shipment-cover" src="${esc(s.cover)}" alt="Обложка ${esc(s.title)}" loading="lazy">`:examples.map(p=>photo(p,'cover-photo')).join('')}${s.cover?'':`<span class="brand-label">${esc(s.brand)}</span>`}</div><div class="card-body"><div class="card-meta">${badge(s.status)}<span class="muted">${s.publishedAt?date(s.publishedAt):'Не опубликовано'}</span></div><h2>${esc(s.title)}</h2><span class="muted">${s.products.length} позиций · от ${money(min)}</span><div class="card-footer"><span>Дата: ${date(s.eta)}</span><span class="arrow" aria-hidden="true">↗</span></div></div></button></article>`;
   }).join(''):'<div class="empty"><strong>Поступлений пока нет</strong>Новые товары появятся здесь после публикации.</div>';
   document.querySelectorAll('[data-shipment]').forEach(b=>b.onclick=()=>openShipment(b.dataset.shipment));
   list.forEach(loadImages);
@@ -259,9 +260,22 @@ function showBotSetup(){
 function editShipment(existing){
   importController?.abort();
   const groups=existing?.groupingMode==='manual'?[...(existing.groups||[])]:[];
+  let cover=existing?.cover||null;
   let products=existing?manualProducts(existing.products.map(p=>({...p,total:p.total??p.stock})),groups):null,warnings=[],previousProducts=products||[];
-  showDialog(existing?'Настройки поступления':'Новое поступление',`<form id="shipment-form"><label class="field">Название<input name="title" required maxlength="160" value="${esc(existing?.title||'')}" placeholder="Например, Gurdini Slim Series"></label><div class="form-grid"><label class="field">Бренд<input name="brand" maxlength="80" value="${esc(existing?.brand||'')}"></label><label class="field">Статус<select name="status">${Object.entries(statuses).filter(([k])=>['draft','arrived','closed'].includes(k)).map(([k,v])=>`<option value="${k}" ${(existing?.status || 'arrived')===k?'selected':''}>${v}</option>`).join('')}</select></label><label class="field">Дата поступления<input type="date" name="eta" value="${esc(existing?.eta||'')}"></label><label class="field">Дата публикации<input type="date" name="publishedAt" value="${esc(existing?.publishedAt||'')}"></label></div><label class="field">Описание<textarea name="description" maxlength="3000">${esc(existing?.description||'')}</textarea></label><label class="field">${existing?'Обновить товары из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx"></label><p class="fine-print">Кол-во в Excel — исходное количество товара до вычета заказов. При обновлении действующие заказы сохраняются.</p><div id="import-info">${products?`<p class="import-summary">${products.length} позиций</p>`:''}</div><div id="group-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить поступление</button></form>`);
+  showDialog(existing?'Настройки поступления':'Новое поступление',`<form id="shipment-form"><label class="field">Название<input name="title" required maxlength="160" value="${esc(existing?.title||'')}" placeholder="Например, Gurdini Slim Series"></label><div class="form-grid"><label class="field">Бренд<input name="brand" maxlength="80" value="${esc(existing?.brand||'')}"></label><label class="field">Статус<select name="status">${Object.entries(statuses).filter(([k])=>['draft','arrived','closed'].includes(k)).map(([k,v])=>`<option value="${k}" ${(existing?.status || 'arrived')===k?'selected':''}>${v}</option>`).join('')}</select></label><label class="field">Дата поступления<input type="date" name="eta" value="${esc(existing?.eta||'')}"></label><label class="field">Дата публикации<input type="date" name="publishedAt" value="${esc(existing?.publishedAt||'')}"></label></div><label class="field">Описание<textarea name="description" maxlength="3000">${esc(existing?.description||'')}</textarea></label><div class="cover-editor"><label class="field">Обложка поступления (JPG, PNG, WebP)<input type="file" id="cover-file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"></label><div id="cover-preview"></div><button type="button" class="secondary" id="remove-cover" hidden>Удалить обложку</button><p id="cover-error" class="error" role="alert"></p></div><label class="field">${existing?'Обновить товары из Excel':'Excel с товарами'}<input type="file" id="xlsx-file" accept=".xls,.xlsx"></label><p class="fine-print">Кол-во в Excel — исходное количество товара до вычета заказов. При обновлении действующие заказы сохраняются.</p><div id="import-info">${products?`<p class="import-summary">${products.length} позиций</p>`:''}</div><div id="group-editor"></div><p id="import-error" class="error" role="alert"></p><button class="primary full" id="save-shipment" type="submit" ${products?'':'disabled'}>Сохранить поступление</button></form>`);
   const form=$('#shipment-form');
+  function renderCover(){
+    $('#cover-preview').innerHTML=cover?`<img src="${esc(cover)}" alt="Предпросмотр обложки" class="cover-preview-image">`:'<span class="fine-print">Без обложки будут показаны фотографии товаров.</span>';
+    $('#remove-cover').hidden=!cover;
+  }
+  renderCover();
+  $('#remove-cover').onclick=()=>{cover=null;$('#cover-file').value='';$('#cover-error').textContent='';renderCover();};
+  $('#cover-file').onchange=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    $('#cover-error').textContent='';
+    try{cover=await compressCover(file);renderCover();}
+    catch(error){$('#cover-error').textContent=error.message;e.target.value='';}
+  };
   function reviewGroups(){mountGroupEditor($('#group-editor'),products,groups);}
   if(products)reviewGroups();
   $('#xlsx-file').onchange=async e=>{
@@ -285,7 +299,7 @@ function editShipment(existing){
     if(products.some(p=>p.price===null)){$('#import-error').textContent='Заполните цены всех товаров перед сохранением.';return;}
     if(warnings.length&&!$('#accept-warnings')?.checked){$('#import-error').textContent='Подтвердите проверку замечаний.';return;}
     const b=$('#save-shipment');b.disabled=true;$('#import-error').textContent='';
-    try{await api('/admin/shipments','POST',{id:existing?.id||crypto.randomUUID(),...Object.fromEntries(new FormData(form)),groupingMode:'manual',groups,products});closeDialog();await refresh();toast('Поступление сохранено.');}catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
+    try{await api('/admin/shipments','POST',{id:existing?.id||crypto.randomUUID(),...Object.fromEntries(new FormData(form)),groupingMode:'manual',groups,cover,products});closeDialog();await refresh();toast('Поступление сохранено.');}catch(e){if($('#import-error')){$('#import-error').textContent=e.message;b.disabled=false;}else toast(e.message);}
   };
 }
 function goBack(){if(Object.keys(state.cart).length){showDialog('Вернуться к поступлениям?',`<p>Выбранные количества будут сброшены.</p><button class="primary full" id="leave">Вернуться</button>`);$('#leave').onclick=()=>{closeDialog();state.cart={};state.current=null;state.requestKey=null;render();};}else{state.current=null;render();}}

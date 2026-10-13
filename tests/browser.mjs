@@ -84,6 +84,10 @@ try{
   await page.locator('[data-cancel]').click();await page.locator('#confirm-action').click();await page.waitForSelector('#orders .empty strong');assert.equal(await page.locator('.order').count(),0);
   assert.deepEqual(store.inventory.catalog()[0].products.map(p=>p.stock),[10,5]);
   await page.locator('#admin-tab').click();await page.locator('#new-shipment').click();
+  // An admin can choose a cover independently from the Excel import.
+  await page.locator('#cover-file').setInputFiles({name:'cover.png',mimeType:'image/png',
+    buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/cpQAAAAASUVORK5CYII=','base64')});
+  await page.waitForSelector('#cover-preview img');
   // A minimal XLSX with inline strings verifies the same import UI used for supplier files.
   const z=new JSZip();
   z.file('xl/workbook.xml','<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Test" sheetId="1" r:id="rId1"/></sheets></workbook>');
@@ -93,6 +97,10 @@ try{
   await page.locator('#xlsx-file').setInputFiles({name:'Test.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await z.generateAsync({type:'nodebuffer'})});
   await page.waitForSelector('#accept-warnings');await page.locator('#accept-warnings').check();await page.locator('#save-shipment').click();
   await page.waitForSelector('.admin-row:nth-child(2)');assert.equal(store.inventory.catalog(true).length,2);
+  assert.match(store.inventory.catalog(true).find(s=>s.title==='Test').cover,/^data:image\/(webp|png);base64,/);
+  await page.locator('[data-view="shipments"]').click();
+  await page.waitForSelector('.shipment-cover');
+  await page.locator('#admin-tab').click();
   // Binary XLS goes through the worker. Empty prices must be filled before Save.
   await page.locator('#new-shipment').click();
   await page.locator('#xlsx-file').setInputFiles({name:'Legacy.xls',mimeType:'application/vnd.ms-excel',buffer:legacyFixture()});
