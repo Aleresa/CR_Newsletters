@@ -134,6 +134,21 @@ try{
   await page.locator(`[data-delete-shipment="${legacy.id}"]`).click();await page.locator('#delete-shipment').click();
   await page.waitForSelector('.admin-row:nth-child(3)',{state:'detached'});
   assert.equal(store.inventory.catalog(true).length,2);
+  // Separate global stock sync reads only SKU and quantity, not supplier names or prices.
+  const stockRows=[['Код','Доступно','Цена'],['test-1','0','999999'],['not-in-app','4','1']];
+  z.file('xl/worksheets/sheet1.xml',`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${stockRows.map((r,i)=>`<row r="${i+1}">${r.map((v,j)=>`<c r="${String.fromCharCode(65+j)}${i+1}" t="inlineStr"><is><t>${v}</t></is></c>`).join('')}</row>`).join('')}</sheetData></worksheet>`);
+  await page.locator('#sync-stock').click();
+  await page.locator('#stock-sync-file').setInputFiles({name:'Stock.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:await z.generateAsync({type:'nodebuffer'})});
+  await page.waitForSelector('#stock-sync-result .import-summary');
+  assert.match(await page.locator('#stock-sync-result').innerText(),/Не найдены: 1/);
+  assert.equal(await page.locator('#stock-sync-apply').isDisabled(),true);
+  await page.locator('#stock-sync-ack').check();
+  await page.locator('#stock-sync-apply').click();
+  await page.waitForSelector('#stock-sync-file',{state:'hidden'});
+  const stockListing=store.inventory.catalog(true).find(s=>s.title==='Test').products[0];
+  assert.equal(stockListing.stock,0);
+  assert.equal(stockListing.price,15000);
+  assert.equal(store.inventory.catalog(true).find(s=>s.title==='Test').products.length,1);
   await page.locator('#all-orders').click();await page.waitForSelector('.badge.cancelled');
   await page.locator('#refresh').click();await page.waitForSelector('.badge.cancelled');
   assert.equal(await page.locator('h1').textContent(),'Все заказы');

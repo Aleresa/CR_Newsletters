@@ -100,6 +100,42 @@ export class Inventory {
       return shipment;
     });
   }
+  // Synchronize the available stock shown to customers, across every existing shipment.
+  // Existing reservations are NOT touched: total = newAvailable + placed.
+  stockSync(input,apply=false) {
+    if(!input || !Array.isArray(input.items) || !input.items.length || input.items.length>30000)
+      throw new ApiError(400,'В файле должно быть от 1 до 30 000 остатков.');
+    const desired=new Map();
+    for(const item of input.items){
+      const sku=typeof item?.sku==='string'?item.sku.trim():'';
+      const stock=item?.stock;
+      if(!validId(sku) || !Number.isSafeInteger(stock) || stock<0 || stock>10000000)
+        throw new ApiError(400,'Некорректный артикул или остаток в Excel.');
+      if(desired.has(sku))throw new ApiError(400,`Повтор артикула ${sku}. Исправьте Excel.`);
+      desired.set(sku,stock);
+    }
+    const run=()=>{
+      const shipmentNames=new Map(this.rows("SELECT id,json_extract(data,'$.title') AS title FROM shipments").map(s=>[s.id,s.title]));
+      const matched=new Set(),changes=[];
+      let matchedPositions=0,unchanged=0;
+      for(const row of this.rows("SELECT shipment,id,json_extract(data,'$.sku') AS sku,json_extract(data,'$.name') AS name,total,placed FROM products")){
+        const sku=String(row.sku||row.id).trim();
+        if(!desired.has(sku))continue;
+        matched.add(sku);matchedPositions++;
+        const stock=desired.get(sku),previous=row.total-row.placed;
+        if(stock===previous){unchanged++;continue;}
+        const nextTotal=stock+row.placed;
+        if(nextTotal>10000000)throw new ApiError(400,`Слишком большое количество для артикула ${sku} с учётом действующих заказов.`);
+        if(changes.length<100)changes.push({sku,name:row.name,shipment:shipmentNames.get(row.shipment)||row.shipment,previous,stock});
+        if(apply)this.sql.exec('UPDATE products SET total=? WHERE shipment=? AND id=?',nextTotal,row.shipment,row.id);
+      }
+      const missing=[...desired.keys()].filter(sku=>!matched.has(sku));
+      if(apply && !matched.size)throw new ApiError(400,'Не найдено совпадающих артикулов. Остатки не изменены.');
+      return {source:desired.size,matched:matched.size,matchedPositions,changed:matchedPositions-unchanged,unchanged,
+        missing:missing.length,missingExamples:missing.slice(0,25),changes,applied:apply};
+    };
+    return apply?this.transaction(run):run();
+  }
   placeOrder(user,input) {
     if(!validId(input.shipmentId) || !validId(input.requestKey) || !Array.isArray(input.lines) || !input.lines.length || input.lines.length>100) throw new ApiError(400,'Выберите от 1 до 100 позиций.');
     const seen=new Set();

@@ -18,3 +18,8 @@
 .cover-editor .field{margin:0 0 10px}
 .cover-preview-image{display:block;width:100%;max-height:240px;object-fit:contain;border-radius:10px;background:#f4f7fc}
 .cover-editor .secondary{margin-top:12px}
+
+/* Global stock synchronization */
+.stock-preview{margin:14px 0}
+.stock-ack{display:flex;align-items:flex-start;gap:10px;line-height:1.5}
+.stock-ack input{width:auto;min-height:auto;margin:3px 0 0;flex:none}

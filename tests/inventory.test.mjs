@@ -102,6 +102,29 @@ test('worker rejects missing identity/admin rights, accepts signed client, and b
   assert.equal((await store.fetch(new Request('https://app/telegram/webhook',{method:'POST',headers,body:'{}'}))).status,403);
 });
 
+test('bulk stock API requires Telegram owner and protects all other product fields',async()=>{
+  const {sql,txn,inv}=fixture(),token='test:stock';
+  const ctx={storage:{sql,transactionSync:txn},waitUntil:()=>{}};
+  const input=JSON.stringify({items:[{sku:'1',stock:0},{sku:'missing',stock:10}]});
+  const req=(route,who)=>new Request('https://app/api/admin/stock/'+route,{
+    method:'POST',headers:{'Content-Type':'application/json',...(who?{'X-Telegram-Init-Data':who}:{})},body:input});
+  const store=new NewsletterStore(ctx,{BOT_TOKEN:token,ADMIN_IDS:'123'});
+  assert.equal((await store.fetch(req('preview'))).status,401);
+  assert.equal((await store.fetch(req('apply',signedData(token,{user:JSON.stringify({id:789,first_name:'Visitor'})})))).status,403);
+  const admin=signedData(token);
+  const baseline=JSON.stringify(inv.catalog(true)[0].products);
+  const preview=await store.fetch(req('preview',admin));
+  assert.equal(preview.status,200);
+  assert.equal((await preview.json()).changed,1);
+  assert.equal(JSON.stringify(inv.catalog(true)[0].products),baseline);
+  const result=await store.fetch(req('apply',admin));
+  assert.equal(result.status,200);
+  assert.equal((await result.json()).changed,1);
+  const products=inv.catalog(true)[0].products;
+  assert.equal(products[0].stock,0);
+  assert.equal(products[0].price,16000);
+  assert.equal(products[1].stock,2);
+});
 test('only the owner can configure bot; webhook secret survives restart and never reaches client',async t=>{
   const {sql,txn}=fixture(),token='test:setup',env={BOT_TOKEN:token,ADMIN_IDS:'123'};
   const ctx={storage:{sql,transactionSync:txn},waitUntil:()=>{}};
