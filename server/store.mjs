@@ -115,18 +115,18 @@ export class Inventory {
       desired.set(sku,stock);
     }
     const run=()=>{
-      const shipmentNames=new Map(this.rows('SELECT id,data FROM shipments').map(s=>[s.id,JSON.parse(s.data).title]));
+      const shipmentNames=new Map(this.rows("SELECT id,json_extract(data,'$.title') AS title FROM shipments").map(s=>[s.id,s.title]));
       const matched=new Set(),changes=[];
       let matchedPositions=0,unchanged=0;
-      for(const row of this.rows('SELECT shipment,id,data,total,placed FROM products')){
-        const product=JSON.parse(row.data),sku=String(product.sku||row.id).trim();
+      for(const row of this.rows("SELECT shipment,id,json_extract(data,'$.sku') AS sku,json_extract(data,'$.name') AS name,total,placed FROM products")){
+        const sku=String(row.sku||row.id).trim();
         if(!desired.has(sku))continue;
         matched.add(sku);matchedPositions++;
         const stock=desired.get(sku),previous=row.total-row.placed;
         if(stock===previous){unchanged++;continue;}
         const nextTotal=stock+row.placed;
         if(nextTotal>10000000)throw new ApiError(400,`Слишком большое количество для артикула ${sku} с учётом действующих заказов.`);
-        if(changes.length<100)changes.push({sku,name:product.name,shipment:shipmentNames.get(row.shipment)||row.shipment,previous,stock});
+        if(changes.length<100)changes.push({sku,name:row.name,shipment:shipmentNames.get(row.shipment)||row.shipment,previous,stock});
         if(apply)this.sql.exec('UPDATE products SET total=? WHERE shipment=? AND id=?',nextTotal,row.shipment,row.id);
       }
       const missing=[...desired.keys()].filter(sku=>!matched.has(sku));
