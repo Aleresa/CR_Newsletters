@@ -2,13 +2,14 @@
 const normalize=value=>String(value??'').trim().toLowerCase().replace(/ё/g,'е').replace(/[.\s_-]+/g,'');
 const skuHeaders=['код','кодтовара','артикул'];
 const stockHeaders=['доступно','остаток','колво','количество','фактическийостаток'];
+const nameHeaders=['наименование','наименованиетовара','название','названиетовара'];
 export function parseStockRows(rows){
   let header;
   for(const [rowNumber,row] of rows){
     const values=Object.entries(row).map(([column,value])=>[column,normalize(value)]);
     const find=aliases=>aliases.map(name=>values.find(([,value])=>value===name)?.[0]).find(column=>column!==undefined);
-    const sku=find(skuHeaders),stock=find(stockHeaders);
-    if(sku!==undefined && stock!==undefined){header={rowNumber,sku,stock};break;}
+    const sku=find(skuHeaders),stock=find(stockHeaders),name=find(nameHeaders);
+    if(sku!==undefined && stock!==undefined){header={rowNumber,sku,stock,name};break;}
   }
   if(!header)throw Error('В Excel нужны столбцы «Код» (или «Артикул») и «Доступно» (или «Остаток»).');
   const items=[],warnings=[],seen=new Map();
@@ -18,6 +19,9 @@ export function parseStockRows(rows){
     const sku=String(row[header.sku]??'').trim();
     if(!sku)continue;
     const raw=String(row[header.stock]??'').trim();
+    // Group/subtotal rows in wholesale stock reports have no product name.
+    if(!/^[A-Za-z0-9_-]{1,80}$/.test(sku) &&
+      ((header.name!==undefined&&!String(row[header.name]??'').trim()) || /^(итого|всего)\b/i.test(sku)))continue;
     // Keep article numbers exactly as displayed, including leading zeroes.
     if(!/^[A-Za-z0-9_-]{1,80}$/.test(sku)){
       skipped++;if(warnings.length<30)warnings.push(`Строка ${rowNumber}: некорректный артикул «${sku.slice(0,40)}».`);
