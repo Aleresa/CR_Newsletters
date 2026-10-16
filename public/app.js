@@ -2,6 +2,7 @@ import {readSupplierExcel,exportOrders} from './xlsx.js';
 import {groupProducts,manualProducts,groupKey} from './product-groups.js';
 import {mountGroupEditor} from './group-editor.js';
 import {compressCover} from './cover-image.js';
+import {readStockExcel} from './stock-sync.js';
 
 const $=s=>document.querySelector(s), app=$('#app'), dialog=$('#dialog');
 const tg=window.Telegram?.WebApp;
@@ -213,12 +214,51 @@ function changeOrder(id,status,all){
 }
 function renderAdmin(){
   if(!state.admin){state.view='shipments';render();return;}
-  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">CR / NEWSLETTERS</p><h1>Управление</h1></div><button class="primary" id="new-shipment">+ Поступление</button></div><div class="actions"><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="managers">Менеджеры</button><button class="secondary" id="setup-bot">Подключить бота</button></div><section class="admin-panel">${state.shipments.length?state.shipments.map(s=>`<div class="admin-row"><div><strong>${esc(s.title)}</strong><small>${s.products.length} позиций · ${date(s.eta)}</small>${badge(s.status)}</div><div class="shipment-actions"><button class="secondary" data-edit="${esc(s.id)}">Изменить</button><button class="danger" data-delete-shipment="${esc(s.id)}">Удалить</button></div></div>`).join(''):'<p class="muted">Загрузите Excel, проверьте товары и опубликуйте поступление.</p>'}</section>`;
+  app.innerHTML=`<div class="page-heading"><div><p class="eyebrow">CR / NEWSLETTERS</p><h1>Управление</h1></div><button class="primary" id="new-shipment">+ Поступление</button></div><div class="actions"><button class="primary" id="sync-stock">Обновить остатки из Excel</button><button class="secondary" id="all-orders">Все заказы</button><button class="secondary" id="managers">Менеджеры</button><button class="secondary" id="setup-bot">Подключить бота</button></div><section class="admin-panel">${state.shipments.length?state.shipments.map(s=>`<div class="admin-row"><div><strong>${esc(s.title)}</strong><small>${s.products.length} позиций · ${date(s.eta)}</small>${badge(s.status)}</div><div class="shipment-actions"><button class="secondary" data-edit="${esc(s.id)}">Изменить</button><button class="danger" data-delete-shipment="${esc(s.id)}">Удалить</button></div></div>`).join(''):'<p class="muted">Загрузите Excel, проверьте товары и опубликуйте поступление.</p>'}</section>`;
+  $('#sync-stock').onclick=showStockSync;
   $('#new-shipment').onclick=()=>editShipment();$('#all-orders').onclick=()=>{state.view='all-orders';render();};
   document.querySelectorAll('[data-delete-shipment]').forEach(b=>b.onclick=()=>deleteShipment(state.shipments.find(s=>s.id===b.dataset.deleteShipment)));
   $('#setup-bot').onclick=showBotSetup;
   $('#managers').onclick=editManagers;
   document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editShipment(state.shipments.find(s=>s.id===b.dataset.edit)));
+}
+function showStockSync(){
+  importController?.abort();
+  let parsed=null,preview=null;
+  showDialog('Обновление остатков из Excel',`<p class="fine-print">Загрузите один общий отчёт остатков. Сопоставление по «Код» или «Артикул» во всех категориях. Изменится только доступное количество; товары, цены, фото и действующие заказы сохранятся.</p><label class="field">Общий Excel (.xls / .xlsx)<input type="file" id="stock-sync-file" accept=".xls,.xlsx"></label><div id="stock-sync-result" aria-live="polite"></div><p class="error" id="stock-sync-error" role="alert"></p><button class="primary full" type="button" id="stock-sync-apply" disabled>Обновить остатки</button>`);
+  const result=$('#stock-sync-result'),error=$('#stock-sync-error'),button=$('#stock-sync-apply');
+  $('#stock-sync-file').onchange=async e=>{
+    const file=e.target.files[0];if(!file)return;
+    importController?.abort();
+    const controller=new AbortController();importController=controller;
+    parsed=null;preview=null;button.disabled=true;error.textContent='';
+    result.innerHTML='<p class="fine-print">Читаем артикулы и остатки, затем сверяем с приложением…</p>';
+    try{
+      const next=await readStockExcel(file,{signal:controller.signal});
+      if(controller.signal.aborted||!dialog.open)return;
+      const checked=await api('/admin/stock/preview','POST',{items:next.items},{timeout:120000});
+      if(controller.signal.aborted||!dialog.open)return;
+      parsed=next;preview=checked;
+      const issues=next.skipped||checked.missing;
+      result.innerHTML=`<div class="import-summary">Артикулов в файле: <strong>${checked.source}</strong><br>Найдено в приложении: <strong>${checked.matched}</strong> (позиций: ${checked.matchedPositions})<br>Будут изменены остатки: <strong>${checked.changed}</strong><br>Без изменений: ${checked.unchanged}<br>Не найдены: ${checked.missing}<br>Пропущены из-за ошибок: ${next.skipped}</div>${next.warnings.length?`<details class="warning"><summary>Ошибки строк: ${next.skipped}</summary>${next.warnings.map(w=>`<p>${esc(w)}</p>`).join('')}</details>`:''}${checked.missing?`<details class="warning"><summary>Не найденные артикулы: ${checked.missing}</summary><p class="fine-print">${checked.missingExamples.map(esc).join(', ')}</p></details>`:''}${checked.changes.length?`<details class="stock-preview"><summary>Посмотреть изменения (до 100)</summary><div class="import-preview"><table><thead><tr><th>Категория</th><th>Артикул</th><th>Было</th><th>Станет</th></tr></thead><tbody>${checked.changes.map(c=>`<tr><td>${esc(c.shipment)}</td><td>${esc(c.sku)}</td><td>${c.previous}</td><td><strong>${c.stock}</strong></td></tr>`).join('')}</tbody></table></div></details>`:''}${issues?`<label class="field stock-ack"><input type="checkbox" id="stock-sync-ack"> Я проверил пропущенные и не найденные артикулы</label>`:''}`;
+      if(issues)$('#stock-sync-ack').onchange=()=>{button.disabled=!$('#stock-sync-ack').checked||!checked.changed;};
+      else button.disabled=!checked.changed;
+      if(!checked.matched)error.textContent='Совпадений нет. Ни одна позиция не будет изменена.';
+    }catch(err){
+      if(controller.signal.aborted||!dialog.open)return;
+      parsed=null;preview=null;result.textContent='';error.textContent=err.message;
+    }
+  };
+  button.onclick=async()=>{
+    if(!parsed||!preview||!preview.changed)return;
+    if($('#stock-sync-ack')&&!$('#stock-sync-ack').checked){error.textContent='Подтвердите просмотр замечаний.';return;}
+    button.disabled=true;error.textContent='';button.textContent='Обновляем остатки…';
+    try{
+      const saved=await api('/admin/stock/apply','POST',{items:parsed.items},{timeout:120000});
+      closeDialog();await refresh();
+      toast(`Остатки обновлены: ${saved.changed} позиций. Новые товары не создавались.`);
+    }catch(err){if(!dialog.open)return;error.textContent=err.message;button.textContent='Повторить обновление';button.disabled=false;}
+  };
 }
 function deleteShipment(shipment){
   showDialog('Удалить поступление?',`<p><strong>${esc(shipment.title)}</strong></p><p>Поступление и его товары исчезнут из приложения. Отменённые заказы останутся в истории администратора. Поступление с действующими заказами удалить нельзя.</p><p id="delete-error" class="error" role="alert"></p><button class="danger full" id="delete-shipment">Удалить поступление</button>`);
