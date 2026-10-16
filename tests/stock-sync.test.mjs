@@ -35,6 +35,15 @@ test('stock-only spreadsheet supports headers and preserves displayed leading ze
   assert.equal(output.skipped,1);
   assert.equal(output.warnings.length,1);
 });
+test('real stock report skips group headings and prioritizes Code and Available over Article and Total Stock',()=>{
+  const report=new Map([[8,{1:'Код',2:'Артикул',3:'Наименование',5:'Доступно',8:'Остаток'}],
+    [9,{1:'1 - Gurdini/Внешние аккумуляторы',5:''}],
+    [10,{1:'917055',2:'GBP-07B',3:'Батарея черная',5:'3',8:'6'}],
+    [11,{1:'917056',2:'GBP-07W',3:'Батарея белая',5:'0',8:'8'}]]);
+  const result=parseStockRows(report);
+  assert.deepEqual(result.items,[{sku:'917055',stock:3},{sku:'917056',stock:0}]);
+  assert.equal(result.skipped,0);
+});
 test('stock-only parser rejects ambiguous duplicates, bad headers and invalid numbers',()=>{
   assert.throws(()=>parseStockRows(new Map([[1,{0:'Код',1:'Цена'}],[2,{0:'0001',1:3}]])),/столбцы/);
   assert.throws(()=>parseStockRows(new Map([[1,{0:'Код',1:'Доступно'}],[2,{0:'A',1:3}],[3,{0:'A',1:4}]])),/разными остатками/);
